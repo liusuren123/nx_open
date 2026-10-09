@@ -28,6 +28,16 @@ if(withNvidiaDecoder)
     string(APPEND CMAKE_CXX_FLAGS " ${compile_options}")
     set_directory_properties(PROPERTIES COMPILE_OPTIONS "")
 
+    # nvcc needs the real cl.exe path. build.bat exports NX_MSVC_CL_EXE pointing at
+    # cl.exe inside the actual VCToolsInstallDir. Passing a junction path here makes
+    # nvcc fail with "Host compiler targets unsupported OS" because it can't find
+    # Windows SDK headers above the junction.
+    if(WIN32 AND DEFINED ENV{NX_MSVC_CL_EXE} AND NOT "$ENV{NX_MSVC_CL_EXE}" STREQUAL "")
+        if(EXISTS "$ENV{NX_MSVC_CL_EXE}")
+            set(CMAKE_CUDA_HOST_COMPILER "$ENV{NX_MSVC_CL_EXE}" CACHE FILEPATH "")
+        endif()
+    endif()
+
     enable_language(CUDA)
     find_package(CUDAToolkit)
 

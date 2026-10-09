@@ -239,6 +239,13 @@ ActionHandler::ActionHandler(QObject *parent) :
         &ActionHandler::at_openFileAction_triggered);
     connect(action(menu::OpenFolderAction), &QAction::triggered, this,
         &ActionHandler::at_openFolderAction_triggered);
+    connect(action(menu::AddLocalFolderAction), &QAction::triggered, this,
+        &ActionHandler::at_addLocalFolderAction_triggered);
+    connect(action(menu::RemoveLocalFolderAction), &QAction::triggered, this,
+        &ActionHandler::at_removeLocalFolderAction_triggered);
+
+    connect(action(menu::CloseAllVideosAction), &QAction::triggered, this,
+        &ActionHandler::at_closeAllVideosAction_triggered);
 
     connect(globalSettings(), &SystemSettings::maxSceneItemsChanged, this,
         [this]
@@ -1826,6 +1833,55 @@ void ActionHandler::at_openFolderAction_triggered() {
 
     if (!dirName.isEmpty())
         menu()->trigger(menu::DropResourcesAction, addToResourcePool(dirName));
+}
+
+void ActionHandler::at_addLocalFolderAction_triggered() {
+    QString dirName = QFileDialog::getExistingDirectory(mainWindowWidget(),
+        tr("Add Folder to Local Files..."),
+        QString(),
+        QnCustomFileDialog::directoryDialogOptions());
+
+    if (!dirName.isEmpty()) {
+        // Add folder to local settings media folders
+        auto localSettings = appContext()->localSettings();
+        if (localSettings) {
+            QStringList folders = localSettings->mediaFolders();
+            if (!folders.contains(dirName)) {
+                folders.append(dirName);
+                localSettings->mediaFolders = folders;
+            }
+        }
+    }
+}
+
+void ActionHandler::at_removeLocalFolderAction_triggered() {
+    const auto parameters = menu()->currentParameters(sender());
+    const QString folderPath = parameters.argument(Qn::MediaFolderPathRole).toString();
+
+    if (folderPath.isEmpty())
+        return;
+
+    auto localSettings = appContext()->localSettings();
+    if (!localSettings)
+        return;
+
+    QStringList folders = localSettings->mediaFolders();
+    if (folders.removeAll(folderPath) > 0)
+        localSettings->mediaFolders = folders;
+}
+
+void ActionHandler::at_closeAllVideosAction_triggered() {
+    auto layout = workbench()->currentLayout();
+    if (!layout)
+        return;
+
+    // Copy the items set before iterating - removeItem mutates the underlying set.
+    const QList<QnWorkbenchItem*> itemsToClose(layout->items().begin(), layout->items().end());
+    for (auto item : itemsToClose)
+    {
+        if (layout->items().contains(item))
+            layout->removeItem(item);
+    }
 }
 
 void ActionHandler::openFailoverPriorityDialog() {

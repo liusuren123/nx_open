@@ -45,6 +45,10 @@
 #include <nx/vms/client/desktop/lookup_lists/lookup_lists_dialog.h>
 #include <nx/vms/client/desktop/menu/action_parameters.h>
 #include <nx/vms/client/desktop/menu/actions.h>
+#include <nx/vms/client/desktop/playlists/playlist_list_model.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/playlists/playlist_model.h>
+#include <nx/vms/client/desktop/playlists/playlist_player.h>
 #include <nx/vms/client/desktop/resource/resource_status_helper.h>
 #include <nx/vms/client/desktop/resource_dialogs/filtering/filtered_resource_proxy_model.h>
 #include <nx/vms/client/desktop/resource_dialogs/models/resource_selection_model_adapter.h>
@@ -278,6 +282,15 @@ void registerQmlTypesInternal()
     analytics::taxonomy::AttributeDisplayManager::registerQmlType();
     analytics::taxonomy::AnalyticsDialogTableModel::registerQmlType();
     TableViewColumnsCalculator::registerQmlType();
+
+    PlaylistListModel::registerQmlType();
+    PlaylistModel::registerQmlType();
+    PlaylistPlayer::registerQmlType();
+    qmlRegisterSingletonType<PlaylistManager>("nx.vms.client.desktop", 1, 0, "PlaylistManager",
+        [](QQmlEngine* /*qmlEngine*/, QJSEngine* /*jsEngine*/) -> QObject*
+        {
+            return core::withCppOwnership(appContext()->playlistManager());
+        });
 
     qmlRegisterType<FisheyeCalibrator>("nx.vms.client.desktop", 1, 0, "FisheyeCalibrator");
     qmlRegisterType<ConnectTilesProxyModel>("nx.vms.client.desktop", 1, 0, "ConnectTilesModel");

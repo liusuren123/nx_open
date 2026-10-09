@@ -41,6 +41,7 @@ NX_REFLECTION_ENUM_CLASS(NodeType,
     analyticsEngines, //< Root node for analytics engines.
     otherSystems, //< Root node for remote systems.
     localResources, //< Root node for local resources.
+    mediaFolder, //< Media folder or subdirectory node under Local Files.
 
     // Per-user placeholder nodes.
 

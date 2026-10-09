@@ -354,6 +354,14 @@ void StartupActionsHandler::handleStartupParameters()
         }
     }
 
+    // Local player mode: never connect to cloud or a server. Just show the workbench with the
+    // local file browser.
+    if (startupParameters.localMode)
+    {
+        handleLocalMode();
+        return;
+    }
+
     connectToCloudIfNeeded(startupParameters);
     const bool connectingToSystem = connectToSystemIfNeeded(startupParameters, haveInputFiles);
 
@@ -431,6 +439,18 @@ void StartupActionsHandler::handleInstantDrops(const QnResourceList& resources)
         action(ResourcesModeAction)->setChecked(true);
 
     // Security check - just in case.
+    if (workbench()->layouts().empty())
+        menu()->trigger(OpenNewTabAction);
+}
+
+void StartupActionsHandler::handleLocalMode()
+{
+    // The welcome (login) screen is never used in the local player mode.
+    if (auto window = mainWindow())
+        window->setWelcomeScreenVisible(false);
+
+    // Show a fresh tab with the local file browser, unless files were already opened from the
+    // command line.
     if (workbench()->layouts().empty())
         menu()->trigger(OpenNewTabAction);
 }

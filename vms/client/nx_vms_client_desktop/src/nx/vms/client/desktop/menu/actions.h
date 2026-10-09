@@ -343,6 +343,16 @@ enum IDType
     OpenFolderAction,
 
     /**
+     * Opens a file dialog to add a folder to Local Files tree.
+     */
+    AddLocalFolderAction,
+
+    /**
+     * Removes a folder from Local Files tree.
+     */
+    RemoveLocalFolderAction,
+
+    /**
      * Starts / stops screen recording.
      */
     ToggleScreenRecordingAction,
@@ -1551,6 +1561,13 @@ enum IDType
      * Create bookmark, event log record & hide notification.
      */
     AcknowledgeNotificationAction,
+
+    /**
+     * Closes all video widgets in the current workbench layout, returning the
+     * layout to its empty state. Available from the scene (video wall) context
+     * menu.
+     */
+    CloseAllVideosAction,
 
     ActionCount,
 

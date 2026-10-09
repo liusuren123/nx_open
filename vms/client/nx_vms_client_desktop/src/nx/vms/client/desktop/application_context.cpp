@@ -66,6 +66,7 @@
 #include <nx/vms/client/desktop/menu/actions.h>
 #include <nx/vms/client/desktop/radass/radass_controller.h>
 #include <nx/vms/client/desktop/resource/resource_factory.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
 #include <nx/vms/client/desktop/resource/screen_recording/audio_video_win/audio_video_input.h>
 #include <nx/vms/client/desktop/settings/ipc_settings_synchronizer.h>
@@ -371,6 +372,7 @@ struct ApplicationContext::Private
     std::unique_ptr<UploadManager> uploadManager;
     std::unique_ptr<QnForgottenSystemsManager> forgottenSystemsManager;
     std::unique_ptr<ResourcesChangesManager> resourcesChangesManager;
+    std::unique_ptr<PlaylistManager> playlistManager;
     std::unique_ptr<WebPageDataCache> webPageDataCache;
     std::unique_ptr<QnQtbugWorkaround> qtBugWorkarounds;
     std::unique_ptr<core::DesktopResourceSearcher> desktopResourceSearcher;
@@ -794,6 +796,7 @@ ApplicationContext::ApplicationContext(
             d->uploadManager = std::make_unique<UploadManager>();
             d->forgottenSystemsManager = std::make_unique<QnForgottenSystemsManager>();
             d->resourcesChangesManager = std::make_unique<ResourcesChangesManager>();
+            d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
             d->webPageDataCache = std::make_unique<WebPageDataCache>();
             d->qtBugWorkarounds = std::make_unique<QnQtbugWorkaround>();
             d->cloudGateway = std::make_unique<nx::cloud::gateway::VmsGatewayEmbeddable>();
@@ -1011,6 +1014,11 @@ ResourceDirectoryBrowser* ApplicationContext::resourceDirectoryBrowser() const
 ResourcesChangesManager* ApplicationContext::resourcesChangesManager() const
 {
     return d->resourcesChangesManager.get();
+}
+
+PlaylistManager* ApplicationContext::playlistManager() const
+{
+    return d->playlistManager.get();
 }
 
 WebPageDataCache* ApplicationContext::webPageDataCache() const

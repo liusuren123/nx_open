@@ -31,6 +31,9 @@ private:
     void handleInstantDrops(const QnResourceList& resources);
     void handleAcsModeResources(const QnResourceList& resources, const qint64 timeStampMs);
 
+    /** Handles local mode: hides welcome screen and shows workbench with local file browser. */
+    void handleLocalMode();
+
     bool connectUsingCustomUri(const nx::vms::utils::SystemUri& uri);
     bool connectUsingCommandLineAuth(const QnStartupParameters& startupParameters);
 

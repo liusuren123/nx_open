@@ -10,6 +10,7 @@
 #include <QtWidgets/QGraphicsView>
 #include <QtWidgets/QMenu>
 
+#include <client/client_runtime_settings.h>
 #include <core/resource/layout_resource.h>
 #include <core/resource/media_resource.h>
 #include <core/resource/media_server_resource.h>
@@ -254,8 +255,12 @@ QnMainWindowTitleBarWidget::QnMainWindowTitleBarWidget(
                                // TODO: #vkutin #gdm #ynikitenkov Lift this limitation in the
                                // future
 
-    d->cloudPanel = new QnCloudStatusPanel(windowContext, this);
-    d->cloudPanel->setFocusPolicy(Qt::NoFocus);
+    // The cloud status panel is not available in the local player mode.
+    if (!qnRuntime->isLocalMode())
+    {
+        d->cloudPanel = new QnCloudStatusPanel(windowContext, this);
+        d->cloudPanel->setFocusPolicy(Qt::NoFocus);
+    }
 
     initLayoutNavigation();
     initControls();
@@ -365,7 +370,8 @@ void QnMainWindowTitleBarWidget::dragMoveEvent(QDragMoveEvent* event)
         return;
 
     const int x = event->position().toPoint().x();
-    if (!qBetween(d->layoutTabBar->pos().x(), x, d->cloudPanel->pos().x()))
+    const int dragRight = d->cloudPanel ? d->cloudPanel->pos().x() : width();
+    if (!qBetween(d->layoutTabBar->pos().x(), x, dragRight))
         return;
 
     event->acceptProposedAction();
@@ -619,10 +625,13 @@ void QnMainWindowTitleBarWidget::initControls()
     topLayout->addWidget(d->mainMenuButton);
     topLayout->addWidget(newVLine(0, "dark8"));
     topLayout->addLayout(d->topInnerLayout, 1);
-    topLayout->addSpacing(80);
-    topLayout->addWidget(newVLine("dark8", "dark6"));
-    topLayout->addWidget(d->cloudPanel);
-    topLayout->addWidget(newVLine("dark8", "dark6"));
+    if (d->cloudPanel)
+    {
+        topLayout->addSpacing(80);
+        topLayout->addWidget(newVLine("dark8", "dark6"));
+        topLayout->addWidget(d->cloudPanel);
+        topLayout->addWidget(newVLine("dark8", "dark6"));
+    }
     if (auto indicator = newRecordingIndicator(kControlButtonSize))
     {
         topLayout->addWidget(indicator);

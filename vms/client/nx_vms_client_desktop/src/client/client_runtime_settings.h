@@ -39,6 +39,9 @@ public:
         /** ACS mode - client is run as a separate camera view-only window. */
         ACS_MODE,
 
+        /** Local player mode - client acts as a standalone local file player, never connects. */
+        LOCAL_MODE,
+
         /** Always display full info on cameras. */
         SHOW_FULL_INFO,
 
@@ -88,6 +91,7 @@ private:
         QN_DECLARE_RW_PROPERTY(bool, videoWallWithTimeline, setVideoWallWithTimeLine,
             VIDEO_WALL_WITH_TIMELINE, true)
         QN_DECLARE_RW_PROPERTY(bool, isAcsMode, setAcsMode, ACS_MODE, false)
+        QN_DECLARE_RW_PROPERTY(bool, isLocalMode, setLocalMode, LOCAL_MODE, false)
         QN_DECLARE_RW_PROPERTY(bool, showFullInfo, setShowFullInfo, SHOW_FULL_INFO, false)
         QN_DECLARE_RW_PROPERTY(bool, isGlDoubleBuffer, setGLDoubleBuffer, GL_DOUBLE_BUFFER, true)
         QN_DECLARE_RW_PROPERTY(int, maxSceneItemsOverride, setMaxSceneItemsOverride,

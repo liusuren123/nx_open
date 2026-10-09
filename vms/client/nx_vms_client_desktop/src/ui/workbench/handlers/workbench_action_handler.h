@@ -171,6 +171,9 @@ protected:
     void at_dropResourcesAction_triggered();
     void at_openFileAction_triggered();
     void at_openFolderAction_triggered();
+    void at_addLocalFolderAction_triggered();
+    void at_removeLocalFolderAction_triggered();
+    void at_closeAllVideosAction_triggered();
     void at_aboutAction_triggered();
     void at_openBookmarksSearchAction_triggered();
     void openIntegrationsActionTriggered();

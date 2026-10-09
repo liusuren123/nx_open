@@ -8,7 +8,7 @@
 
 @echo off
 
-set INCOMPATIBLE_VC_TOOLSET_VERSION=14.39
+set INCOMPATIBLE_VC_TOOLSET_VERSION=14.44
 
 set VCVARS_BAT=
 set VC_TOOLSET_VERSION=
@@ -31,7 +31,7 @@ if not "%NX_FORCED_VC_TOOLSET_VERSION%" == "" (
     )
 )
 
-if "%VCToolsVersion%" lss "%INCOMPATIBLE_VC_TOOLSET_VERSION%" (
+if "%VCToolsVersion%" geq "%INCOMPATIBLE_VC_TOOLSET_VERSION%" (
     echo MSVC environment is already initialized for version %VCToolsVersion%.
     echo: %= Print an empty line. =%
     goto :exit
@@ -54,6 +54,10 @@ set _VCVARS_BAT="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\
 set TOOLS_DIRECTORY="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"
 if exist %_VCVARS_BAT% if exist %TOOLS_DIRECTORY% goto :msvc_found
 
+set _VCVARS_BAT="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+set TOOLS_DIRECTORY="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
+if exist %_VCVARS_BAT% if exist %TOOLS_DIRECTORY% goto :msvc_found
+
 set _VCVARS_BAT="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 set TOOLS_DIRECTORY="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC"
 if exist %_VCVARS_BAT% if exist %TOOLS_DIRECTORY% goto :msvc_found
@@ -70,8 +74,9 @@ set _VC_TOOLSET_VERSION=%NX_FORCED_VC_TOOLSET_VERSION%
 if "%_VC_TOOLSET_VERSION%" == "" (
     :: List all the installed toolsets.
     for /f "delims=" %%F in ('dir /b %TOOLS_DIRECTORY%\*') do (
-        :: Check if the first incompatible version is greater than the next toolset version.
-        if "!INCOMPATIBLE_VC_TOOLSET_VERSION!" gtr "%%F" (
+        :: Check if the toolset version is greater than or equal to the minimum compatible version.
+        :: Use string comparison - for versions like 14.44 vs 14.44.35207, longer version wins.
+        if "%%F" geq "!INCOMPATIBLE_VC_TOOLSET_VERSION!" (
             :: Check if the maximum found toolset version is less than the next toolset version.
             if "!_VC_TOOLSET_VERSION!" lss "%%F" (
                 set "_VC_TOOLSET_VERSION=%%F"

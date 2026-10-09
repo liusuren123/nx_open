@@ -52,6 +52,8 @@ QnClientRuntimeSettings::QnClientRuntimeSettings(
         setLightModeOverride(Qn::LightModeACS);
     }
 
+    setLocalMode(startupParameters.localMode);
+
     // Default value.
     if (lightModeOverride() != -1)
         setLightMode(static_cast<Qn::LightModeFlags>(lightModeOverride()));

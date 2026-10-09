@@ -41,6 +41,9 @@
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_grouping/resource_grouping.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_source/resource_tree_item_key_source_pool.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_tree_item_factory.h>
+#include <nx/vms/client/desktop/resource_views/entity_resource_tree/media_folder_tree_entity.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
+#include <nx/vms/client/desktop/application_context.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/user_layout_resource_index.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/common/system_settings.h>
@@ -877,15 +880,15 @@ AbstractEntityPtr ResourceTreeEntityBuilder::createLocalFilesGroupEntity() const
 
     fileLayoutsGroupList->installItemSource(m_itemKeySourcePool->fileLayoutsSource());
 
-    auto mediaFilesList = makeKeyList<QnResourcePtr>(
-        resourceItemCreator(m_itemFactory.get(), user()),
-        locaResourcesOrder());
-
-    mediaFilesList->installItemSource(m_itemKeySourcePool->localMediaSource());
+    auto mediaFolderTree = std::make_unique<MediaFolderTreeEntity>(
+        m_itemFactory.get(),
+        user(),
+        resourcePool(),
+        appContext()->localSettings());
 
     auto localResourceComposition = std::make_unique<CompositionEntity>();
     localResourceComposition->addSubEntity(std::move(fileLayoutsGroupList));
-    localResourceComposition->addSubEntity(std::move(mediaFilesList));
+    localResourceComposition->addSubEntity(std::move(mediaFolderTree));
 
     return makeFlatteningGroup(m_itemFactory->createLocalFilesItem(),
         std::move(localResourceComposition));

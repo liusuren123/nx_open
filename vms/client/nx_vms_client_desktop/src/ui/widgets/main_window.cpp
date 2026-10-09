@@ -578,7 +578,8 @@ void MainWindow::setTitleVisible(bool visible)
 
 void MainWindow::setWelcomeScreenVisible(bool visible)
 {
-    if (!m_welcomeScreen)
+    // The welcome (login) screen is never shown in the local player mode.
+    if (!m_welcomeScreen || qnRuntime->isLocalMode())
         visible = false;
 
     if (m_welcomeScreenVisible == visible)

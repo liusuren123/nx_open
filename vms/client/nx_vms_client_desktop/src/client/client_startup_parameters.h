@@ -52,6 +52,9 @@ struct QnStartupParameters
      */
     bool acsMode = false;
 
+    /** Local mode: skip login and show workbench directly with local file browser. */
+    bool localMode = true;
+
     QString authenticationString;
     const static QString kAuthenticationStringKey;
 

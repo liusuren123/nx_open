@@ -31,6 +31,7 @@ class RadassController;
 class ResourceFactory;
 class ResourceDirectoryBrowser;
 class ResourcesChangesManager;
+class PlaylistManager;
 class RunningInstancesManager;
 class ScreenRecordingSettings;
 class SharedMemoryManager;
@@ -214,6 +215,8 @@ public:
     ResourceDirectoryBrowser* resourceDirectoryBrowser() const;
 
     ResourcesChangesManager* resourcesChangesManager() const;
+
+    PlaylistManager* playlistManager() const;
 
     QnForgottenSystemsManager* forgottenSystemsManager() const;
 

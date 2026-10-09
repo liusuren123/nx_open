@@ -2,6 +2,8 @@
 
 #include "qml_resource_browser_widget.h"
 
+#include <memory>
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QItemSelectionModel>
 #include <QtCore/QScopedValueRollback>
@@ -18,6 +20,7 @@
 #include <nx/vms/client/desktop/help/help_topic_accessor.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/action_target_provider.h>
+#include <nx/vms/client/desktop/playlists/playlist_player.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/client/desktop/window_context.h>
 #include <ui/graphics/opengl/gl_functions.h>
@@ -32,6 +35,8 @@ struct QmlResourceBrowserWidget::Private
     QmlResourceBrowserWidget* const q;
     const QmlProperty<qreal> opacity{q, "opacity"};
     const ResourceBrowserWrapper resourceBrowser{q->windowContext(), {q, "resourceBrowser"}, q};
+    const std::unique_ptr<PlaylistPlayer> playlistPlayer{
+        std::make_unique<PlaylistPlayer>(q->windowContext())};
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -50,6 +55,7 @@ QmlResourceBrowserWidget::QmlResourceBrowserWidget(WindowContext* context, QWidg
     setAttribute(Qt::WA_TranslucentBackground);
 
     rootContext()->setContextProperty(WindowContext::kQmlPropertyName, context);
+    rootContext()->setContextProperty("playlistPlayer", d->playlistPlayer.get());
 
     setClearColor(Qt::transparent);
     setResizeMode(QQuickWidget::ResizeMode::SizeRootObjectToView);

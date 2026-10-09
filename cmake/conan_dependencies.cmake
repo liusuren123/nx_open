@@ -111,8 +111,16 @@ if(CONAN_WINSDK-REDIST_ROOT)
 endif()
 
 if(CONAN_CUDA-TOOLKIT_ROOT)
-    set(CUDAToolkit_ROOT ${CONAN_CUDA-TOOLKIT_ROOT})
-    set(ENV{CUDA_PATH} ${CONAN_CUDA-TOOLKIT_ROOT})
+    # Allow the build script to override the conan-provided CUDA toolkit by exporting
+    # NX_CUDA_TOOLKIT_DIR (e.g. to point at a system-installed CUDA 12.6 when the
+    # conan-managed 12.5 package would not match the active MSVC toolset).
+    if(DEFINED ENV{NX_CUDA_TOOLKIT_DIR} AND NOT "$ENV{NX_CUDA_TOOLKIT_DIR}" STREQUAL "")
+        set(CUDAToolkit_ROOT "$ENV{NX_CUDA_TOOLKIT_DIR}")
+        set(ENV{CUDA_PATH} "$ENV{NX_CUDA_TOOLKIT_DIR}")
+    else()
+        set(CUDAToolkit_ROOT ${CONAN_CUDA-TOOLKIT_ROOT})
+        set(ENV{CUDA_PATH} ${CONAN_CUDA-TOOLKIT_ROOT})
+    endif()
 endif()
 
 if(CONAN_VMS_HELP_ROOT)

@@ -111,6 +111,7 @@ QnStartupParameters QnStartupParameters::fromCommandLineArg(int argc, char** arg
 
     /* Runtime settings */
     addParserParam(commandLineParser, &result.acsMode, "--acs");
+    addParserParam(commandLineParser, &result.localMode, "--local-mode");
 
     /* Custom uri handling */
     QString strCustomUri;
@@ -173,6 +174,17 @@ QnStartupParameters QnStartupParameters::fromCommandLineArg(int argc, char** arg
     }
     result.videoWallGuid = nx::Uuid(strVideoWallGuid);
     result.videoWallItemGuid = nx::Uuid(strVideoWallItemGuid);
+
+    // The local player mode is the default, but explicit connection requests (ACS, video wall,
+    // command-line auth, custom URI) take precedence over it because they require a server
+    // connection.
+    if (result.acsMode
+        || result.isVideoWallMode()
+        || !result.authenticationString.isEmpty()
+        || result.customUri.isValid())
+    {
+        result.localMode = false;
+    }
 
     result.qmlImportPaths = qmlImportPaths.split(',', Qt::SkipEmptyParts);
 
