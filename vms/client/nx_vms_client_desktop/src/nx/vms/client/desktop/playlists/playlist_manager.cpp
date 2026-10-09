@@ -1,0 +1,271 @@
+// Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/
+
+#include "playlist_manager.h"
+
+#include <algorithm>
+#include <functional>
+
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
+
+#include <core/resource/file_processor.h>
+#include <nx/utils/property_storage/property.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
+
+namespace nx::vms::client::desktop {
+
+namespace {
+
+int indexOf(const QList<Playlist>& playlists, const nx::Uuid& id)
+{
+    for (int i = 0; i < playlists.size(); ++i)
+    {
+        if (playlists[i].id == id)
+            return i;
+    }
+    return -1;
+}
+
+QString toId(const nx::Uuid& id)
+{
+    return id.isNull() ? QString() : id.toSimpleString();
+}
+
+nx::Uuid fromId(const QString& id)
+{
+    return id.isEmpty() ? nx::Uuid() : nx::Uuid::fromStringSafe(id);
+}
+
+QString normalizedPath(const QString& path)
+{
+    return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
+
+} // namespace
+
+PlaylistManager::PlaylistManager(LocalSettings* settings, QObject* parent):
+    QObject(parent),
+    m_settings(settings)
+{
+    if (m_settings)
+    {
+        connect(&m_settings->playlists, &nx::utils::property_storage::BaseProperty::changed,
+            this, &PlaylistManager::playlistsChanged);
+    }
+}
+
+QList<Playlist> PlaylistManager::playlists() const
+{
+    return m_settings ? m_settings->playlists() : QList<Playlist>();
+}
+
+Playlist PlaylistManager::playlist(const QString& id) const
+{
+    const auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    return index >= 0 ? list.at(index) : Playlist();
+}
+
+QString PlaylistManager::currentPlaylistId() const
+{
+    return m_settings ? toId(m_settings->currentPlaylistId()) : QString();
+}
+
+void PlaylistManager::setPlaylists(const QList<Playlist>& playlists)
+{
+    if (!m_settings)
+        return;
+
+    // Assignment emits Property::changed, which is re-emitted as playlistsChanged().
+    m_settings->playlists = playlists;
+}
+
+void PlaylistManager::setCurrentPlaylistId(const QString& id)
+{
+    if (!m_settings)
+        return;
+
+    const nx::Uuid uuid = fromId(id);
+    if (m_settings->currentPlaylistId() == uuid)
+        return;
+
+    m_settings->currentPlaylistId = uuid;
+    emit currentPlaylistChanged();
+}
+
+QString PlaylistManager::createPlaylist(const QString& name)
+{
+    Playlist newPlaylist;
+    newPlaylist.id = nx::Uuid::createUuid();
+    newPlaylist.name = name.isEmpty() ? tr("New playlist") : name;
+
+    auto list = playlists();
+    list.append(newPlaylist);
+    setPlaylists(list);
+
+    if (currentPlaylistId().isEmpty())
+        setCurrentPlaylistId(toId(newPlaylist.id));
+
+    emit playlistChanged(toId(newPlaylist.id));
+    return toId(newPlaylist.id);
+}
+
+bool PlaylistManager::removePlaylist(const QString& id)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    list.removeAt(index);
+    setPlaylists(list);
+
+    if (currentPlaylistId() == id)
+    {
+        if (list.isEmpty())
+            setCurrentPlaylistId(QString());
+        else
+            setCurrentPlaylistId(toId(list.first().id));
+    }
+
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::renamePlaylist(const QString& id, const QString& name)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0 || list[index].name == name)
+        return false;
+
+    list[index].name = name;
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::addPaths(const QString& id, const QStringList& paths)
+{
+    QList<PlaylistEntry> entries;
+    for (const QString& path: paths)
+    {
+        const QFileInfo info(path);
+        if (info.isDir())
+            entries.append({normalizedPath(path), /*isFolder*/ true});
+        else if (info.isFile() && !QnFileProcessor::findAcceptedFiles(path).isEmpty())
+            entries.append({normalizedPath(path), /*isFolder*/ false});
+    }
+
+    if (entries.isEmpty())
+        return false;
+
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    list[index].entries.append(entries);
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::addFiles(const QString& id, const QList<QUrl>& urls)
+{
+    QStringList paths;
+    for (const QUrl& url: urls)
+    {
+        const QString path = url.isLocalFile() ? url.toLocalFile() : url.toString();
+        if (!path.isEmpty())
+            paths.append(path);
+    }
+    return addPaths(id, paths);
+}
+
+bool PlaylistManager::setEntries(const QString& id, const QList<PlaylistEntry>& entries)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0 || list[index].entries == entries)
+        return false;
+
+    list[index].entries = entries;
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::removeEntries(const QString& id, const QList<int>& rows)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    auto& entries = list[index].entries;
+
+    // Remove from the highest row to keep the remaining indices valid.
+    QList<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end(), std::greater<int>());
+
+    bool removed = false;
+    for (int row: sortedRows)
+    {
+        if (row >= 0 && row < entries.size())
+        {
+            entries.removeAt(row);
+            removed = true;
+        }
+    }
+
+    if (!removed)
+        return false;
+
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::moveEntry(const QString& id, int fromRow, int toRow)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    auto& entries = list[index].entries;
+    if (fromRow < 0 || fromRow >= entries.size() || toRow < 0 || toRow >= entries.size())
+        return false;
+
+    if (fromRow == toRow)
+        return false;
+
+    entries.move(fromRow, toRow);
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+bool PlaylistManager::clearEntries(const QString& id)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0 || list[index].entries.isEmpty())
+        return false;
+
+    list[index].entries.clear();
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
+QStringList PlaylistManager::expandedFilePaths(const Playlist& playlist)
+{
+    QStringList result;
+    for (const auto& entry: playlist.entries)
+        result.append(QnFileProcessor::findAcceptedFiles(entry.path));
+    return result;
+}
+
+} // namespace nx::vms::client::desktop

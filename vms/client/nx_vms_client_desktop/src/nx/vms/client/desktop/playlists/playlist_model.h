@@ -1,0 +1,51 @@
+// Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/
+
+#pragma once
+
+#include <QtCore/QAbstractListModel>
+#include <QtCore/QString>
+
+namespace nx::vms::client::desktop {
+
+class PlaylistManager;
+
+/**
+ * Lists the entries of a single playlist identified by its string id. Used to build the media list
+ * of the local player sidebar.
+ */
+class PlaylistModel: public QAbstractListModel
+{
+    Q_OBJECT
+    Q_PROPERTY(QString playlistId READ playlistId WRITE setPlaylistId NOTIFY playlistIdChanged)
+
+public:
+    enum Role
+    {
+        FileNameRole = Qt::UserRole + 1,
+        FilePathRole,
+        IsFolderRole,
+    };
+    Q_ENUM(Role)
+
+    explicit PlaylistModel(QObject* parent = nullptr);
+
+    QString playlistId() const;
+    void setPlaylistId(const QString& id);
+
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex& index, int role) const override;
+    QHash<int, QByteArray> roleNames() const override;
+
+    static void registerQmlType();
+
+signals:
+    void playlistIdChanged();
+
+private:
+    PlaylistManager* manager() const;
+    void refresh();
+
+    QString m_playlistId;
+};
+
+} // namespace nx::vms::client::desktop
