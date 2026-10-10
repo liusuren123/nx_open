@@ -19,7 +19,6 @@
 #include <nx/vms/client/desktop/help/help_topic.h>
 #include <nx/vms/client/desktop/resource/server.h>
 #include <nx/vms/client/desktop/resource_views/data/resource_extra_status.h>
-#include <nx/vms/client/desktop/resource_views/data/resource_tree_globals.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_grouping/resource_grouping.h>
 #include <nx/vms/client/desktop/style/resource_icon_cache.h>
 #include <nx/vms/common/system_context.h>
@@ -133,9 +132,6 @@ QVariant ResourceItem::data(int role) const
 
         case Qn::ExtraInfoRole:
             return resourceExtraInfoData();
-
-        case Qn::NodeTypeRole:
-            return QVariant::fromValue(ResourceTree::NodeType::resource);
     }
     return QVariant();
 }

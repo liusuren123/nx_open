@@ -2,11 +2,8 @@
 
 #include "resource_tree_item_factory.h"
 
-#include <QtCore/QFileInfo>
-
 #include <client/client_globals.h>
 #include <core/resource/camera_resource.h>
-#include <core/resource/file_processor.h>
 #include <core/resource/layout_resource.h>
 #include <core/resource/resource.h>
 #include <core/resource/resource_display_info.h>
@@ -585,23 +582,6 @@ AbstractItemPtr ResourceTreeItemFactory::createLocalFilesItem() const
         .withRole(Qn::HelpTopicIdRole, static_cast<int>(HelpTopic::Id::MediaFolders));
 }
 
-AbstractItemPtr ResourceTreeItemFactory::createMediaFolderItem(const QString& folderPath) const
-{
-    return GenericItemBuilder()
-        .withRole(Qt::DisplayRole, QFileInfo(folderPath).fileName())
-        .withRole(Qn::ResourceIconKeyRole, static_cast<int>(IconCache::LocalResources))
-        .withRole(Qn::NodeTypeRole, QVariant::fromValue(NodeType::mediaFolder))
-        .withRole(Qn::MediaFolderPathRole, folderPath);
-}
-
-AbstractItemPtr ResourceTreeItemFactory::createSubdirectoryItem(const QString& dirName) const
-{
-    return GenericItemBuilder()
-        .withRole(Qt::DisplayRole, dirName)
-        .withRole(Qn::ResourceIconKeyRole, static_cast<int>(IconCache::LocalResources))
-        .withRole(Qn::NodeTypeRole, QVariant::fromValue(NodeType::mediaFolder));
-}
-
 AbstractItemPtr ResourceTreeItemFactory::createAllCamerasAndResourcesItem() const
 {
     return GenericItemBuilder()
@@ -662,14 +642,6 @@ AbstractItemPtr ResourceTreeItemFactory::createResourceItem(const QnResourcePtr&
         m_resourceItemCache.insert(resource, sharedItemOrigin);
     }
     return m_resourceItemCache.value(resource)->createSharedInstance();
-}
-
-AbstractItemPtr ResourceTreeItemFactory::createResourceItemForFile(const QString& filePath)
-{
-    // Create resource on demand for local file
-    if (auto resource = QnFileProcessor::createResourcesForFile(filePath, systemContext()->resourcePool()))
-        return createResourceItem(resource);
-    return nullptr;
 }
 
 AbstractItemPtr ResourceTreeItemFactory::createResourceGroupItem(

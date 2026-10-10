@@ -44,8 +44,6 @@ public:
     AbstractItemPtr createUsersItem() const;
     AbstractItemPtr createOtherSystemsItem() const;
     AbstractItemPtr createLocalFilesItem() const;
-    AbstractItemPtr createMediaFolderItem(const QString& folderPath) const;
-    AbstractItemPtr createSubdirectoryItem(const QString& dirName) const;
     AbstractItemPtr createHealthMonitorsItem() const;
     AbstractItemPtr createVideoWallsItem(QString customName = QString()) const;
 
@@ -59,9 +57,6 @@ public:
 
     // Resource Tree resource based items.
     AbstractItemPtr createResourceItem(const QnResourcePtr& resource);
-
-    // Create resource item for a local file path (creates resource on demand).
-    AbstractItemPtr createResourceItemForFile(const QString& filePath);
 
     // Resource Tree head item for user defined group.
     AbstractItemPtr createResourceGroupItem(

@@ -300,14 +300,6 @@ struct ResourceTreeInteractionHandler::Private: public QnWorkbenchContextAware
                 return withNodeType(parameters);
             }
 
-            case NodeType::mediaFolder:
-            {
-                const auto folderPath = index.data(Qn::MediaFolderPathRole).toString();
-                const auto parameters = menu::Parameters()
-                    .withArgument(Qn::MediaFolderPathRole, folderPath);
-                return withNodeType(parameters);
-            }
-
             default:
                 break;
         }

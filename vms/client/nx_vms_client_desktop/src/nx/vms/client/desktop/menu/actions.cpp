@@ -520,17 +520,6 @@ void initialize(Manager* manager, Action* root)
             .condition(!condition::showreelIsRunning())
             .text(ContextMenu::tr("Folder..."));
 
-        factory(AddLocalFolderAction)
-            .flags(Main | Tree)
-            .condition(!condition::showreelIsRunning())
-            .text(ContextMenu::tr("Add Folder..."));
-
-        factory(RemoveLocalFolderAction)
-            .flags(Main | Tree)
-            .condition(!condition::showreelIsRunning())
-            .text(ContextMenu::tr("Remove Folder"))
-            .shortcut(QKeySequence::Delete);
-
         factory().separator()
             .flags(Main);
 

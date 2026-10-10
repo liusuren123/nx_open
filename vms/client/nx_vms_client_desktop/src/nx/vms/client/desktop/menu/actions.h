@@ -343,16 +343,6 @@ enum IDType
     OpenFolderAction,
 
     /**
-     * Opens a file dialog to add a folder to Local Files tree.
-     */
-    AddLocalFolderAction,
-
-    /**
-     * Removes a folder from Local Files tree.
-     */
-    RemoveLocalFolderAction,
-
-    /**
      * Starts / stops screen recording.
      */
     ToggleScreenRecordingAction,

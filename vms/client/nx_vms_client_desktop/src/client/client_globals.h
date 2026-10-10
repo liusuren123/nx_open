@@ -290,9 +290,6 @@ namespace Qn
         /** Remote session ID. Used in OpenSessionInNewWindowAction. */
         SessionIdRole,
 
-        /** Role for media folder path (QString). Used in RemoveLocalFolderAction. */
-        MediaFolderPathRole,
-
         /** CloudSystemConnectData structure. Used in the ConnectToCloudSystemAction. */
         CloudSystemConnectDataRole,
 
