@@ -128,6 +128,12 @@ void PlaylistPlayer::openCurrentFile()
 
     m_currentResource = resources.first();
 
+    // A playlist entry replaces whatever is currently shown, so the previous video must be closed
+    // first. Dropping the new resource onto a non-empty layout would append another item instead of
+    // replacing the current one, and local files are only rewound to the beginning when they are
+    // added to an empty layout.
+    menu()->trigger(menu::CloseAllVideosAction, menu::Parameters());
+
     menu()->trigger(menu::DropResourcesAction, resources);
 
     // The widget may already exist, e.g. when the same file is opened again.
