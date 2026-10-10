@@ -3428,6 +3428,9 @@ void ActionHandler::openInBrowser(
     targetUrl = QnNetworkProxyFactory::urlToResource(targetUrl, server);
 
     const auto gateway = appContext()->cloudGateway();
+    if (!gateway)
+        return;
+
     nx::network::SocketAddress targetAddress{targetUrl.host(), (uint16_t) targetUrl.port()};
     switch (authMethod)
     {

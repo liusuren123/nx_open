@@ -95,7 +95,12 @@ Q_INVOKABLE QQuickWebEngineProfile* WebEngineProfileManager::getProfile(
     if (parentId.isNull())
         return d->getOrCreateProfile(name, offTheRecord);
 
-    const auto proxyAddress = LocalProxyServer::instance()->address();
+    // The proxy server is not created in the local player mode, where web pages are not used.
+    const auto proxyServer = LocalProxyServer::instance();
+    if (!proxyServer)
+        return d->getOrCreateProfile(name, offTheRecord);
+
+    const auto proxyAddress = proxyServer->address();
 
     return d->getOrCreateProfile(name + "_" + resourceId,
         offTheRecord,
@@ -104,7 +109,7 @@ Q_INVOKABLE QQuickWebEngineProfile* WebEngineProfileManager::getProfile(
             .setHost(proxyAddress.address)
             .setPort(proxyAddress.port)
             .setUserName(resourceId)
-            .setPassword(QString::fromStdString(LocalProxyServer::instance()->password()))
+            .setPassword(QString::fromStdString(proxyServer->password()))
             .toUrl() .toQUrl());
 }
 

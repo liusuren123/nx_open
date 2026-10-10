@@ -106,9 +106,12 @@ void ServerRemoteAccessWatcher::onResourcesRemoved(const QnResourceList& resourc
             continue;
 
         const auto gateway = appContext()->cloudGateway();
-        gateway->forward(server->getPrimaryAddress(),
-            /*targetPorts*/ {},
-            nx::network::ssl::kAcceptAnyCertificate);
+        if (gateway)
+        {
+            gateway->forward(server->getPrimaryAddress(),
+                /*targetPorts*/ {},
+                nx::network::ssl::kAcceptAnyCertificate);
+        }
 
         server->disconnect(this);
     }
@@ -118,6 +121,9 @@ void ServerRemoteAccessWatcher::updateRemoteAccess(const ServerResourcePtr& serv
 {
     using namespace nx::network::http::header;
     const auto gateway = appContext()->cloudGateway();
+    if (!gateway)
+        return;
+
     const auto address = server->getCloudAddress().value_or(server->getPrimaryAddress());
     RemoteAccessData remoteAccessData;
     remoteAccessData.enabledForCurrentUser = isRemoteAccessEnabledForCurrentUser();

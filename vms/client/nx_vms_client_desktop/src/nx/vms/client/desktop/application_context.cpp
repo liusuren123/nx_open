@@ -781,7 +781,9 @@ ApplicationContext::ApplicationContext(
             d->performanceMonitor = std::make_unique<PerformanceMonitor>();
             d->statisticsModule = std::make_unique<ContextStatisticsModule>();
             d->initializeNetworkModules();
-            d->sharedMemoryManager->connectToCloudStatusWatcher(); //< Depends on CloudStatusWatcher.
+            // The local player mode never connects to the cloud.
+            if (!startupParameters.localMode)
+                d->sharedMemoryManager->connectToCloudStatusWatcher(); //< Depends on CloudStatusWatcher.
             d->initializeSystemContext();
             if (features.core.flags.testFlag(CoreFeatureFlag::cross_site))
                 d->initializeCrossSystemModules();
@@ -799,18 +801,26 @@ ApplicationContext::ApplicationContext(
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
             d->webPageDataCache = std::make_unique<WebPageDataCache>();
             d->qtBugWorkarounds = std::make_unique<QnQtbugWorkaround>();
-            d->cloudGateway = std::make_unique<nx::cloud::gateway::VmsGatewayEmbeddable>();
-            d->localProxyServer = std::make_unique<LocalProxyServer>();
+            if (!startupParameters.localMode)
+            {
+                // The cloud gateway runs a separate process and the local proxy server exposes a
+                // local endpoint; neither is needed by the local player.
+                d->cloudGateway = std::make_unique<nx::cloud::gateway::VmsGatewayEmbeddable>();
+                d->localProxyServer = std::make_unique<LocalProxyServer>();
+            }
             d->joystickManager.reset(joystick::Manager::create());
 
-            QObject::connect(d->sharedMemoryManager.get(),
-                &SharedMemoryManager::clientCommandRequested,
-                cloudLayoutsManager(),
-                [this](SharedMemoryData::Command command, const QByteArray& /*data*/)
-                {
-                    if (command == SharedMemoryData::Command::updateCloudLayouts)
-                        cloudLayoutsManager()->updateLayouts();
-                });
+            if (!startupParameters.localMode)
+            {
+                QObject::connect(d->sharedMemoryManager.get(),
+                    &SharedMemoryManager::clientCommandRequested,
+                    cloudLayoutsManager(),
+                    [this](SharedMemoryData::Command command, const QByteArray& /*data*/)
+                    {
+                        if (command == SharedMemoryData::Command::updateCloudLayouts)
+                            cloudLayoutsManager()->updateLayouts();
+                    });
+            }
 
             break;
         }
