@@ -78,6 +78,7 @@ nx_wix_light(${unsigned_msi_filename}
         applauncher
         minilauncher
         wix_custom_actions
+        nx_wix_bundle_cleanup
         distribution_wix_common_resources
         distribution_wix_fonts_module
         distribution_wix_client_qml_module

@@ -12,6 +12,23 @@
                 Vital="yes"
                 Compressed="yes">
             </MsiPackage>
+
+            <!-- WiX generates a random registration id for every bundle, so rebuilding and
+                 reinstalling the same version leaves an extra "Apps & Features" entry behind,
+                 whose uninstall removes the shared client MSI (application, shortcuts and client
+                 settings). Runs on every install and drops the registrations of all other builds
+                 of this product; the one that is being installed is passed in and preserved. -->
+            <ExePackage
+                Id="CleanStaleClientBundles"
+                SourceFile="${bin_source_dir}/nx_wix_bundle_cleanup.exe"
+                InstallCommand='--display-name "${customization.vmsName} Client" --keep-provider-key "[WixBundleProviderKey]"'
+                UninstallCommand="--noop"
+                DetectCondition="0"
+                Permanent="yes"
+                Vital="no"
+                Protocol="none"
+                Compressed="yes">
+            </ExePackage>
         </PackageGroup>
     </Fragment>
 </Wix>

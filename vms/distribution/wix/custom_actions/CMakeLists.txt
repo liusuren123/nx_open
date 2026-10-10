@@ -41,3 +41,15 @@ nx_add_target(wix_custom_actions LIBRARY
     FOLDER distribution
 )
 set_property(TARGET wix_custom_actions PROPERTY CXX_STANDARD 20)
+
+# Helper run by the installer bundle on every install to drop stale "Apps & Features"
+# registrations of previously installed builds of the same version.
+nx_add_target(nx_wix_bundle_cleanup EXECUTABLE
+    NO_MOC
+    RC_FILE "bundle_cleanup/resource.rc"
+    SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/bundle_cleanup/src"
+    PRIVATE_LIBS
+        Advapi32
+    FOLDER distribution
+)
+set_property(TARGET nx_wix_bundle_cleanup PROPERTY CXX_STANDARD 20)
