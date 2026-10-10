@@ -20,7 +20,7 @@ class LocalSettings;
  * identifiers are exposed to QML as strings, which is why the public API uses QString ids while the
  * stored Playlist::id remains an nx::Uuid.
  */
-class PlaylistManager: public QObject
+class NX_VMS_CLIENT_DESKTOP_API PlaylistManager: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString currentPlaylistId

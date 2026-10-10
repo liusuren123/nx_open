@@ -2,6 +2,7 @@
 
 #include "local_settings.h"
 
+#include <QtCore/QDir>
 #include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 
@@ -106,6 +107,16 @@ LocalSettings::LocalSettings():
     if (!mediaFolders().isEmpty())
         nx::utils::file_system::ensureDir(mediaFolders().first());
 
+    save();
+    generateDocumentation("Local Settings", "Options from the \"Local Settings\" dialog.");
+}
+
+LocalSettings::LocalSettings(const QString& settingsPath):
+    Storage(new nx::utils::property_storage::FileSystemBackend(QDir(settingsPath)))
+{
+    // The test settings directory starts empty, so neither migrations of the user's old settings
+    // nor defaults that could touch the real filesystem are needed here.
+    load();
     save();
     generateDocumentation("Local Settings", "Options from the \"Local Settings\" dialog.");
 }

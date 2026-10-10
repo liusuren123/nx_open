@@ -178,10 +178,7 @@ QnStartupParameters QnStartupParameters::fromCommandLineArg(int argc, char** arg
     // The local player mode is the default, but explicit connection requests (ACS, video wall,
     // command-line auth, custom URI) take precedence over it because they require a server
     // connection.
-    if (result.acsMode
-        || result.isVideoWallMode()
-        || !result.authenticationString.isEmpty()
-        || result.customUri.isValid())
+    if (result.requiresServerConnection())
     {
         result.localMode = false;
     }
@@ -277,4 +274,12 @@ bool QnStartupParameters::isVideoWallMode() const
 bool QnStartupParameters::isVideoWallLauncherMode() const
 {
     return isVideoWallMode() && videoWallItemGuid.isNull();
+}
+
+bool QnStartupParameters::requiresServerConnection() const
+{
+    return acsMode
+        || isVideoWallMode()
+        || !authenticationString.isEmpty()
+        || customUri.isValid();
 }

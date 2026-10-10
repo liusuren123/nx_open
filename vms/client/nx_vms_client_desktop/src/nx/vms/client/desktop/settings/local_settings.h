@@ -30,12 +30,18 @@
 
 namespace nx::vms::client::desktop {
 
-class LocalSettings: public nx::utils::property_storage::Storage
+class NX_VMS_CLIENT_DESKTOP_API LocalSettings: public nx::utils::property_storage::Storage
 {
     Q_OBJECT
 
 public:
     LocalSettings();
+
+    /**
+     * Creates a settings instance that stores its data in the given directory. Intended for unit
+     * tests so that they do not touch the user's real local settings.
+     */
+    explicit LocalSettings(const QString& settingsPath);
 
     void reload();
 

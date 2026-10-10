@@ -10,7 +10,7 @@
 #include <nx/vms/client/core/network/logon_data.h>
 #include <nx/vms/utils/system_uri.h>
 
-struct QnStartupParameters
+struct NX_VMS_CLIENT_DESKTOP_API QnStartupParameters
 {
     static const int kInvalidScreen = -1;
     static const bool kFullScreenDisabledByDefault = false;
@@ -32,6 +32,13 @@ struct QnStartupParameters
      * instances of appropriate version.
      */
     bool isVideoWallLauncherMode() const;
+
+    /**
+     * @returns true if the given parameters require a connection to a Server (ACS mode, video
+     *     wall mode, command-line authentication or a custom URI). In that case the default local
+     *     player mode is turned off.
+     */
+    bool requiresServerConnection() const;
 
     bool allowMultipleClientInstances = false;
     const static QString kAllowMultipleClientInstancesKey;
