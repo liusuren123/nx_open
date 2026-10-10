@@ -27,6 +27,9 @@
             <Component><File Name="Qt6QuickControls2Basic.dll" KeyPath="yes" DiskId="3"/></Component>
             <Component><File Name="Qt6QuickControls2BasicStyleImpl.dll" KeyPath="yes" DiskId="3"/></Component>
             <Component><File Name="Qt6QuickControls2Impl.dll" KeyPath="yes" DiskId="3"/></Component>
+            <Component><File Name="Qt6QuickDialogs2.dll" KeyPath="yes" DiskId="3"/></Component>
+            <Component><File Name="Qt6QuickDialogs2QuickImpl.dll" KeyPath="yes" DiskId="3"/></Component>
+            <Component><File Name="Qt6QuickDialogs2Utils.dll" KeyPath="yes" DiskId="3"/></Component>
             <Component><File Name="Qt6Quick.dll" KeyPath="yes" DiskId="3"/></Component>
             <Component><File Name="Qt6QuickEffects.dll" KeyPath="yes" DiskId="3"/></Component>
             <Component><File Name="Qt6QuickLayouts.dll" KeyPath="yes" DiskId="3"/></Component>
