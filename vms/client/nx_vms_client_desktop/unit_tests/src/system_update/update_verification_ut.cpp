@@ -1,5 +1,7 @@
 // Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/
 
+#include <nx/branding.h>
+
 #include <nx/vms/client/desktop/system_update/multi_server_updates_widget.h>
 #include <nx/vms/common/system_context.h>
 #include <nx/vms/common/system_settings.h>
@@ -9,7 +11,22 @@
 
 namespace {
 
-const QString packageRawData = R"(
+// The build's branding may declare a custom Client variant. In that case update verification
+// looks for a `customClient` package carrying this variant instead of a plain `client` package,
+// so the test package manifests have to be adapted accordingly.
+QString adaptPackagesForBranding(const QString& raw)
+{
+    const QString variant = nx::branding::customClientVariant();
+    if (variant.isEmpty())
+        return raw;
+
+    QString result = raw;
+    result.replace(R"("component": "client",)",
+        QString(R"("component": "customClient", "customClientVariant": "%1",)").arg(variant));
+    return result;
+}
+
+const QString packageRawData = adaptPackagesForBranding(R"(
 {
     "version": "4.0.0.28524",
     "cloudHost": "testvms.cloud",
@@ -33,9 +50,9 @@ const QString packageRawData = R"(
             "md5": "bd823350defd778c9990b908d90f92aa"
         }
     ]
-})";
+})");
 
-const QString packagesForSystemSupportTest = R"(
+const QString packagesForSystemSupportTest = adaptPackagesForBranding(R"(
 {
     "version": "4.0.0.29069",
     "cloudHost": "testvms.cloud",
@@ -65,7 +82,7 @@ const QString packagesForSystemSupportTest = R"(
             "md5": "aedf0b757dc806a1980858ecfcb805f3"
         }
     ]
-})";
+})");
 
 } // namespace
 

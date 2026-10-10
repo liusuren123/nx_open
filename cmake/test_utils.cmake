@@ -85,10 +85,24 @@ function(nx_add_test target) # [NO_GTEST] [NO_QT] [NO_NX_UTILS] ...
     endif()
 
     if(WINDOWS)
-        # Adding ${CMAKE_MSVCIDE_RUN_PATH} to PATH for running unit tests via CTest.
-        set(new_path "${CMAKE_MSVCIDE_RUN_PATH};$ENV{PATH}")
-        string(REPLACE ";" "\;" new_path "${new_path}")
-        set_tests_properties(${target} PROPERTIES ENVIRONMENT "PATH=${new_path}")
+        # Prepend ${CMAKE_MSVCIDE_RUN_PATH} to PATH for running unit tests via CTest,
+        # while preserving the PATH that is present when the tests are launched.
+        # That inherited PATH normally contains the conan runtime binaries (Qt,
+        # ffmpeg, ...) as soon as the build environment is activated, so running the
+        # tests no longer depends on the PATH that happened to be set when CMake was
+        # configured.
+        if(CMAKE_MSVCIDE_RUN_PATH)
+            set(env_modifications "")
+            # Insert in reverse order so that the first path ends up prepended first.
+            foreach(msvcide_run_path_dir IN LISTS CMAKE_MSVCIDE_RUN_PATH)
+                list(INSERT env_modifications 0
+                    "PATH=path_list_prepend:${msvcide_run_path_dir}")
+            endforeach()
+            set_tests_properties(${target} PROPERTIES
+                ENVIRONMENT_MODIFICATION "${env_modifications}")
+            unset(env_modifications)
+            unset(msvcide_run_path_dir)
+        endif()
         set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE OFF) #< Build a console app.
     endif()
 

@@ -19,6 +19,13 @@ namespace test {
 
 TEST(WebEngineViewTest, clipboardIsUnavailableWithoutUserAction)
 {
+    // QtWebEngine requires a real platform plugin and a usable OpenGL context. The unit tests
+    // run with the "offscreen" platform plugin, where the WebEngine renderer cannot initialize;
+    // besides failing the readiness check below, that also leaves the process hanging on
+    // shutdown when other tests are run in the same binary.
+    if (qgetenv("QT_QPA_PLATFORM") == "offscreen")
+        GTEST_SKIP() << "QtWebEngine is not available with the offscreen platform plugin.";
+
     QmlTestEnvironment env;
     QQmlComponent webViewComponent(
         env.engine(),
