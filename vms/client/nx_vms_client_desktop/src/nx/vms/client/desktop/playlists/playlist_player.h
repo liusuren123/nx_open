@@ -6,7 +6,10 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
+#include <core/resource/resource_fwd.h>
 #include <nx/vms/client/desktop/window_context_aware.h>
+
+class QnResourceWidget;
 
 namespace nx::vms::client::desktop {
 
@@ -42,9 +45,16 @@ private:
     void rebuildFiles();
     void openCurrentFile();
 
+    /**
+     * Disables looping for the widget of the entry being played and makes it advance to the next
+     * entry when playback finishes. Does nothing for widgets of other resources.
+     */
+    void hookWidget(QnResourceWidget* widget);
+
     QString m_playlistId;
     QStringList m_files;
     int m_index = -1;
+    QnResourcePtr m_currentResource;
 };
 
 } // namespace nx::vms::client::desktop

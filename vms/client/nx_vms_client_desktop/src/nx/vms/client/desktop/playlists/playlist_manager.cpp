@@ -71,6 +71,12 @@ QString PlaylistManager::currentPlaylistId() const
     return m_settings ? toId(m_settings->currentPlaylistId()) : QString();
 }
 
+QString PlaylistManager::currentPlaylistName() const
+{
+    const QString id = currentPlaylistId();
+    return id.isEmpty() ? QString() : playlist(id).name;
+}
+
 void PlaylistManager::setPlaylists(const QList<Playlist>& playlists)
 {
     if (!m_settings)

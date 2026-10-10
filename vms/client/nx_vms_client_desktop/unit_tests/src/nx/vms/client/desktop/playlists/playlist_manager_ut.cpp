@@ -378,5 +378,19 @@ TEST_F(PlaylistManagerTest, sortEntriesByName)
     EXPECT_FALSE(m_manager->sortEntriesByName("unknown"));
 }
 
+TEST_F(PlaylistManagerTest, currentPlaylistName)
+{
+    EXPECT_TRUE(m_manager->currentPlaylistName().isEmpty());
+
+    const QString id = m_manager->createPlaylist("Alpha");
+    EXPECT_EQ(m_manager->currentPlaylistName(), "Alpha");
+
+    m_manager->renamePlaylist(id, "Beta");
+    EXPECT_EQ(m_manager->currentPlaylistName(), "Beta");
+
+    m_manager->removePlaylist(id);
+    EXPECT_TRUE(m_manager->currentPlaylistName().isEmpty());
+}
+
 } // namespace test
 } // namespace nx::vms::client::desktop

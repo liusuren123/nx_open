@@ -5,12 +5,18 @@
 #include <QtQml/qqml.h>
 
 #include <core/resource/file_processor.h>
+#include <core/resource/resource.h>
 #include <core/resource_management/resource_pool.h>
+#include <nx/streaming/abstract_archive_stream_reader.h>
 #include <nx/vms/client/desktop/application_context.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/actions.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/system_context.h>
+#include <camera/resource_display.h>
+#include <ui/graphics/items/resource/media_resource_widget.h>
+#include <ui/graphics/items/resource/resource_widget.h>
+#include <ui/workbench/workbench_display.h>
 
 namespace nx::vms::client::desktop {
 
@@ -32,6 +38,14 @@ PlaylistPlayer::PlaylistPlayer(WindowContext* context, QObject* parent):
     {
         connect(manager, &PlaylistManager::playbackRequested, this,
             [this](const QString& playlistId, int row) { playEntry(playlistId, row); });
+    }
+
+    // Playlist entries are played one after another, so the widget of the entry being played must
+    // be tracked to stop it from looping and to advance on the end of playback.
+    if (const auto workbenchDisplay = display())
+    {
+        connect(workbenchDisplay, &QnWorkbenchDisplay::widgetAdded, this,
+            [this](QnResourceWidget* widget) { hookWidget(widget); });
     }
 }
 
@@ -112,7 +126,39 @@ void PlaylistPlayer::openCurrentFile()
     if (resources.isEmpty())
         return;
 
+    m_currentResource = resources.first();
+
     menu()->trigger(menu::DropResourcesAction, resources);
+
+    // The widget may already exist, e.g. when the same file is opened again.
+    if (const auto workbenchDisplay = display())
+    {
+        for (const auto widget: workbenchDisplay->widgets(m_currentResource))
+            hookWidget(widget);
+    }
+}
+
+void PlaylistPlayer::hookWidget(QnResourceWidget* widget)
+{
+    const auto resource = widget ? widget->resource() : QnResourcePtr();
+    if (!resource || !m_currentResource || resource->getId() != m_currentResource->getId())
+        return;
+
+    const auto mediaWidget = qobject_cast<QnMediaResourceWidget*>(widget);
+    if (!mediaWidget)
+        return;
+
+    const auto resourceDisplay = mediaWidget->display();
+    if (!resourceDisplay)
+        return;
+
+    const auto reader = resourceDisplay->archiveReader();
+    if (!reader)
+        return;
+
+    // Local files loop by default; a playlist entry is expected to end so that the next one starts.
+    reader->setCycleMode(false);
+    reader->setEndOfPlaybackHandler([this]() { playNext(); });
 }
 
 void PlaylistPlayer::registerQmlType()

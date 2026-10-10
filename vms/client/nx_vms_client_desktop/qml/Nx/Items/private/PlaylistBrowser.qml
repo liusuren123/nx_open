@@ -457,6 +457,13 @@ Item
 
         MenuItem
         {
+            text: qsTr("Rename playlist")
+            enabled: playlistSelector.count > 0
+            onTriggered: renameDialog.open()
+        }
+
+        MenuItem
+        {
             text: qsTr("Remove playlist")
             enabled: playlistSelector.count > 0
             onTriggered:
@@ -488,5 +495,36 @@ Item
 
         title: qsTr("Add Folder to Playlist")
         onAccepted: PlaylistManager.addFilesToCurrentPlaylist([selectedFolder])
+    }
+
+    Dialog
+    {
+        id: renameDialog
+
+        title: qsTr("Rename playlist")
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        padding: 12
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        onOpened:
+        {
+            renameField.text = PlaylistManager.currentPlaylistName
+            renameField.selectAll()
+            renameField.forceActiveFocus()
+        }
+
+        onAccepted:
+        {
+            if (renameField.text.length > 0)
+                PlaylistManager.renamePlaylist(PlaylistManager.currentPlaylistId, renameField.text)
+        }
+
+        contentItem: TextField
+        {
+            id: renameField
+            selectByMouse: true
+        }
     }
 }

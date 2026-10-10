@@ -27,6 +27,9 @@ class NX_VMS_CLIENT_DESKTOP_API PlaylistManager: public QObject
         READ currentPlaylistId
         WRITE setCurrentPlaylistId
         NOTIFY currentPlaylistChanged)
+    Q_PROPERTY(QString currentPlaylistName
+        READ currentPlaylistName
+        NOTIFY currentPlaylistChanged)
 
 public:
     explicit PlaylistManager(LocalSettings* settings, QObject* parent = nullptr);
@@ -36,6 +39,9 @@ public:
 
     QString currentPlaylistId() const;
     void setCurrentPlaylistId(const QString& id);
+
+    /** Name of the current playlist, or an empty string if there is none. */
+    QString currentPlaylistName() const;
 
     /** Creates a new empty playlist and returns its id. */
     Q_INVOKABLE QString createPlaylist(const QString& name = QString());
