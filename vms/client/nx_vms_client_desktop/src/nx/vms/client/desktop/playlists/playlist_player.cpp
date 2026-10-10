@@ -2,6 +2,7 @@
 
 #include "playlist_player.h"
 
+#include <QtCore/QPointer>
 #include <QtQml/qqml.h>
 
 #include <core/resource/file_processor.h>
@@ -13,10 +14,12 @@
 #include <nx/vms/client/desktop/menu/actions.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/system_context.h>
+#include <nx/vms/client/desktop/workbench/workbench.h>
 #include <camera/resource_display.h>
 #include <ui/graphics/items/resource/media_resource_widget.h>
 #include <ui/graphics/items/resource/resource_widget.h>
 #include <ui/workbench/workbench_display.h>
+#include <ui/workbench/workbench_layout.h>
 
 namespace nx::vms::client::desktop {
 
@@ -128,12 +131,8 @@ void PlaylistPlayer::openCurrentFile()
 
     m_currentResource = resources.first();
 
-    // A playlist entry replaces whatever is currently shown, so the previous video must be closed
-    // first. Dropping the new resource onto a non-empty layout would append another item instead of
-    // replacing the current one, and local files are only rewound to the beginning when they are
-    // added to an empty layout.
-    menu()->trigger(menu::CloseAllVideosAction, menu::Parameters());
-
+    // Playlist entries are added to the current layout, so that several of them can be watched at
+    // the same time, exactly like resources opened from the resource tree.
     menu()->trigger(menu::DropResourcesAction, resources);
 
     // The widget may already exist, e.g. when the same file is opened again.
@@ -162,9 +161,34 @@ void PlaylistPlayer::hookWidget(QnResourceWidget* widget)
     if (!reader)
         return;
 
-    // Local files loop by default; a playlist entry is expected to end so that the next one starts.
+    // Local files loop by default; a playlist entry is expected to end.
     reader->setCycleMode(false);
-    reader->setEndOfPlaybackHandler([this]() { playNext(); });
+
+    // When a single playlist video is on the layout, playback advances to the next entry. When
+    // several entries are shown at once (which is what opening them one after another does), every
+    // video just stops at its end so that the layout does not keep growing.
+    const QPointer<QnResourceWidget> widgetGuard(widget);
+    reader->setEndOfPlaybackHandler(
+        [this, widgetGuard]()
+        {
+            if (m_index + 1 >= static_cast<int>(m_files.size()))
+                return; //< Nothing to advance to.
+
+            const auto layout = workbench() ? workbench()->currentLayout() : nullptr;
+            if (!layout || layout->items().size() > 1)
+                return;
+
+            if (widgetGuard)
+            {
+                if (const auto item = widgetGuard->item())
+                {
+                    if (layout->items().contains(item))
+                        layout->removeItem(item);
+                }
+            }
+
+            playNext();
+        });
 }
 
 void PlaylistPlayer::registerQmlType()

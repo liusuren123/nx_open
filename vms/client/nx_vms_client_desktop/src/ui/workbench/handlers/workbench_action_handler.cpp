@@ -629,9 +629,12 @@ void ActionHandler::addToLayout(
     // Cleanup "zoomed" state to ensure further switches to this item will not be affected.
     layout->setItemData(data.uuid, Qn::ItemAddInZoomedStateRole, QVariant());
 
-    if (resource.dynamicCast<QnAviResource>() && layoutSize == 0)
+    if (resource.dynamicCast<QnAviResource>())
     {
-        // Rewind local files to the beginning on an empty layout.
+        // Local files have no live or archive timeline, so a position taken from the layout sync
+        // state (DATETIME_NOW) is meaningless for them: the player cannot seek and shows "no data".
+        // Rewind them to the beginning unconditionally, also when they are added to a non-empty
+        // layout (e.g. a playlist entry opened on top of another video).
         layout->setItemData(data.uuid, Qn::ItemTimeRole, 0);
         layout->setItemData(data.uuid, Qn::ItemPausedRole, false);
         layout->setItemData(data.uuid, Qn::ItemSpeedRole, 1);
