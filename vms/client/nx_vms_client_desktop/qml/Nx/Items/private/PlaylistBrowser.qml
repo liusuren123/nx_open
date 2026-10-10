@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import QtQml
 
 import Nx.Core 1.0
 import Nx.Controls 1.0 as NxControls
@@ -476,34 +477,40 @@ Item
     // ---------------------------------------------------------------------------------------------
     // Playlist actions menu.
 
-    NxControls.Menu
+    NxControls.CompactMenu
     {
         id: playlistMenu
 
-        NxControls.MenuItem
+        background: Rectangle
+        {
+            radius: 2
+            color: ColorTheme.colors.dark13
+        }
+
+        NxControls.CompactMenuItem
         {
             text: qsTr("Sort by name")
             enabled: entryList.count > 1
             onTriggered: PlaylistManager.sortEntriesByName(PlaylistManager.currentPlaylistId)
         }
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Clear playlist")
             enabled: entryList.count > 0
             onTriggered: PlaylistManager.clearEntries(PlaylistManager.currentPlaylistId)
         }
 
-        NxControls.MenuSeparator {}
+        NxControls.CompactMenuSeparator {}
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Rename playlist")
             enabled: playlistSelector.count > 0
             onTriggered: renameDialog.open()
         }
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Remove playlist")
             enabled: playlistSelector.count > 0
@@ -515,22 +522,28 @@ Item
     // ---------------------------------------------------------------------------------------------
     // Entry context menu.
 
-    NxControls.Menu
+    NxControls.CompactMenu
     {
         id: entryContextMenu
 
+        background: Rectangle
+        {
+            radius: 2
+            color: ColorTheme.colors.dark13
+        }
+
         property int targetRow: -1
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Play")
             enabled: entryContextMenu.targetRow >= 0
             onTriggered: playlistBrowser.playEntry(entryContextMenu.targetRow)
         }
 
-        NxControls.MenuSeparator {}
+        NxControls.CompactMenuSeparator {}
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Move up")
             enabled: entryContextMenu.targetRow > 0
@@ -538,7 +551,7 @@ Item
                 entryContextMenu.targetRow - 1)
         }
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Move down")
             enabled: entryContextMenu.targetRow >= 0
@@ -547,16 +560,52 @@ Item
                 entryContextMenu.targetRow + 1)
         }
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Remove from playlist")
             enabled: entryContextMenu.targetRow >= 0
             onTriggered: playlistBrowser.removeEntry(entryContextMenu.targetRow)
         }
 
-        NxControls.MenuSeparator {}
+        NxControls.CompactMenu
+        {
+            id: addToPlaylistMenu
 
-        NxControls.MenuItem
+            title: qsTr("Add to playlist")
+            enabled: entryContextMenu.targetRow >= 0 && playlistSelector.count > 1
+
+            background: Rectangle
+            {
+                radius: 2
+                color: ColorTheme.colors.dark13
+            }
+
+            Instantiator
+            {
+                model: playlistsModel
+
+                delegate: NxControls.CompactMenuItem
+                {
+                    readonly property string targetPlaylistId: playlistId
+
+                    // The entry already belongs to the current playlist.
+                    visible: targetPlaylistId !== PlaylistManager.currentPlaylistId
+                    text: name
+
+                    onTriggered: PlaylistManager.addPaths(targetPlaylistId,
+                        [playlistBrowser.entryPathAt(entryContextMenu.targetRow)])
+                }
+
+                onObjectAdded: (index, object) =>
+                    addToPlaylistMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) =>
+                    addToPlaylistMenu.removeItem(object)
+            }
+        }
+
+        NxControls.CompactMenuSeparator {}
+
+        NxControls.CompactMenuItem
         {
             text: qsTr("Copy path")
             enabled: entryContextMenu.targetRow >= 0
@@ -564,7 +613,7 @@ Item
                 playlistBrowser.entryPathAt(entryContextMenu.targetRow))
         }
 
-        NxControls.MenuItem
+        NxControls.CompactMenuItem
         {
             text: qsTr("Show in file manager")
             enabled: entryContextMenu.targetRow >= 0
