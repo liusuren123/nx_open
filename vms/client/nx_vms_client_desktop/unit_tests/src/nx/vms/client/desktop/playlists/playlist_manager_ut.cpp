@@ -415,5 +415,17 @@ TEST_F(PlaylistManagerTest, durationOfNonMediaFileStaysUnknown)
     EXPECT_FALSE(spy.wait(500));
 }
 
+TEST_F(PlaylistManagerTest, entryPath)
+{
+    const QString id = m_manager->createPlaylist();
+    const QString video = createFile("entry.mp4");
+    ASSERT_TRUE(m_manager->addPaths(id, {video}));
+
+    EXPECT_EQ(clean(m_manager->entryPath(id, 0)), clean(video));
+    EXPECT_TRUE(m_manager->entryPath(id, 1).isEmpty());
+    EXPECT_TRUE(m_manager->entryPath(id, -1).isEmpty());
+    EXPECT_TRUE(m_manager->entryPath("unknown", 0).isEmpty());
+}
+
 } // namespace test
 } // namespace nx::vms::client::desktop

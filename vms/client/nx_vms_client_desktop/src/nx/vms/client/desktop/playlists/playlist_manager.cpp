@@ -16,6 +16,7 @@ extern "C" {
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <core/resource/file_processor.h>
+#include <platform/environment.h>
 #include <nx/utils/property_storage/property.h>
 #include <nx/vms/client/desktop/settings/local_settings.h>
 
@@ -402,6 +403,20 @@ void PlaylistManager::onDurationProbed(const QString& path, qint64 duration)
     m_pendingDurations.remove(path);
     m_durations.insert(path, duration);
     emit durationChanged(path, duration);
+}
+
+QString PlaylistManager::entryPath(const QString& playlistId, int row) const
+{
+    const auto entries = playlist(playlistId).entries;
+    return row >= 0 && row < static_cast<int>(entries.size())
+        ? entries.at(row).path
+        : QString();
+}
+
+void PlaylistManager::showInFileManager(const QString& path) const
+{
+    if (!path.isEmpty())
+        QnEnvironment::showInGraphicalShell(path);
 }
 
 } // namespace nx::vms::client::desktop

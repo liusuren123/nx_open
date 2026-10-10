@@ -8,6 +8,7 @@ import QtQuick.Layouts
 import Nx.Core 1.0
 import Nx.Controls 1.0 as NxControls
 
+import nx.vms.client.core 1.0
 import nx.vms.client.desktop 1.0
 
 /**
@@ -258,7 +259,7 @@ Item
         Keys.onDeletePressed:
         {
             if (currentIndex >= 0)
-                removeCurrentEntry()
+                removeEntry(currentIndex)
         }
 
         Keys.onReturnPressed:
@@ -283,8 +284,17 @@ Item
 
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.LeftButton
-                onClicked: entryList.currentIndex = index
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: (mouse) =>
+                {
+                    entryList.currentIndex = index
+
+                    if (mouse.button === Qt.RightButton)
+                    {
+                        entryContextMenu.targetRow = index
+                        entryContextMenu.popup(entryDelegate, mouse.x, mouse.y)
+                    }
+                }
                 onDoubleClicked:
                 {
                     entryList.currentIndex = index
@@ -416,7 +426,7 @@ Item
                 icon.source: "image://skin/20x20/Outline/delete.svg"
                 GlobalToolTip.text: qsTr("Remove selected")
                 enabled: entryList.currentIndex >= 0
-                onClicked: removeCurrentEntry()
+                onClicked: removeEntry(entryList.currentIndex)
             }
 
             ToolButton
@@ -425,7 +435,7 @@ Item
                 icon.source: "image://skin/20x20/Outline/arrow_up.svg"
                 GlobalToolTip.text: qsTr("Move up")
                 enabled: entryList.currentIndex > 0
-                onClicked: moveCurrent(-1)
+                onClicked: moveEntry(entryList.currentIndex, entryList.currentIndex - 1)
             }
 
             ToolButton
@@ -435,14 +445,13 @@ Item
                 GlobalToolTip.text: qsTr("Move down")
                 enabled: entryList.currentIndex >= 0
                     && entryList.currentIndex < entryList.count - 1
-                onClicked: moveCurrent(1)
+                onClicked: moveEntry(entryList.currentIndex, entryList.currentIndex + 1)
             }
         }
     }
 
-    function removeCurrentEntry()
+    function removeEntry(row)
     {
-        const row = entryList.currentIndex
         if (row < 0)
             return
 
@@ -450,56 +459,117 @@ Item
         entryList.currentIndex = Math.min(row, entryList.count - 1)
     }
 
-    function moveCurrent(offset)
+    function moveEntry(fromRow, toRow)
     {
-        const row = entryList.currentIndex
-        if (row < 0)
+        if (fromRow < 0 || toRow < 0 || toRow >= entryList.count)
             return
 
-        const target = row + offset
-        if (target < 0 || target >= entryList.count)
-            return
+        PlaylistManager.moveEntry(PlaylistManager.currentPlaylistId, fromRow, toRow)
+        entryList.currentIndex = toRow
+    }
 
-        PlaylistManager.moveEntry(PlaylistManager.currentPlaylistId, row, target)
-        entryList.currentIndex = target
+    function entryPathAt(row)
+    {
+        return PlaylistManager.entryPath(PlaylistManager.currentPlaylistId, row)
     }
 
     // ---------------------------------------------------------------------------------------------
     // Playlist actions menu.
 
-    Menu
+    NxControls.Menu
     {
         id: playlistMenu
 
-        MenuItem
+        NxControls.MenuItem
         {
             text: qsTr("Sort by name")
             enabled: entryList.count > 1
             onTriggered: PlaylistManager.sortEntriesByName(PlaylistManager.currentPlaylistId)
         }
 
-        MenuItem
+        NxControls.MenuItem
         {
             text: qsTr("Clear playlist")
             enabled: entryList.count > 0
             onTriggered: PlaylistManager.clearEntries(PlaylistManager.currentPlaylistId)
         }
 
-        MenuSeparator {}
+        NxControls.MenuSeparator {}
 
-        MenuItem
+        NxControls.MenuItem
         {
             text: qsTr("Rename playlist")
             enabled: playlistSelector.count > 0
             onTriggered: renameDialog.open()
         }
 
-        MenuItem
+        NxControls.MenuItem
         {
             text: qsTr("Remove playlist")
             enabled: playlistSelector.count > 0
             onTriggered:
                 PlaylistManager.removePlaylist(PlaylistManager.currentPlaylistId)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Entry context menu.
+
+    NxControls.Menu
+    {
+        id: entryContextMenu
+
+        property int targetRow: -1
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Play")
+            enabled: entryContextMenu.targetRow >= 0
+            onTriggered: playlistBrowser.playEntry(entryContextMenu.targetRow)
+        }
+
+        NxControls.MenuSeparator {}
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Move up")
+            enabled: entryContextMenu.targetRow > 0
+            onTriggered: playlistBrowser.moveEntry(entryContextMenu.targetRow,
+                entryContextMenu.targetRow - 1)
+        }
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Move down")
+            enabled: entryContextMenu.targetRow >= 0
+                && entryContextMenu.targetRow < entryList.count - 1
+            onTriggered: playlistBrowser.moveEntry(entryContextMenu.targetRow,
+                entryContextMenu.targetRow + 1)
+        }
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Remove from playlist")
+            enabled: entryContextMenu.targetRow >= 0
+            onTriggered: playlistBrowser.removeEntry(entryContextMenu.targetRow)
+        }
+
+        NxControls.MenuSeparator {}
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Copy path")
+            enabled: entryContextMenu.targetRow >= 0
+            onTriggered: NxGlobals.copyToClipboard(
+                playlistBrowser.entryPathAt(entryContextMenu.targetRow))
+        }
+
+        NxControls.MenuItem
+        {
+            text: qsTr("Show in file manager")
+            enabled: entryContextMenu.targetRow >= 0
+            onTriggered: PlaylistManager.showInFileManager(
+                playlistBrowser.entryPathAt(entryContextMenu.targetRow))
         }
     }
 

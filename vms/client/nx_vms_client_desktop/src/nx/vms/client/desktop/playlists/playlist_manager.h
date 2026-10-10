@@ -91,6 +91,12 @@ public:
      */
     qint64 durationMs(const QString& path) const;
 
+    /** Absolute path of the entry at the given row of the given playlist; empty if out of range. */
+    Q_INVOKABLE QString entryPath(const QString& playlistId, int row) const;
+
+    /** Shows the given file or folder in the OS file manager. */
+    Q_INVOKABLE void showInFileManager(const QString& path) const;
+
 signals:
     void playlistsChanged();
     void playlistChanged(const QString& id);
