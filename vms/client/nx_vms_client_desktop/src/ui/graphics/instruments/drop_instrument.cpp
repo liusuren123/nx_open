@@ -11,6 +11,7 @@
 #include <QtWidgets/QGraphicsSceneDragDropEvent>
 
 #include <common/common_globals.h>
+#include <client/client_runtime_settings.h>
 #include <core/resource/file_processor.h>
 #include <core/resource/layout_resource.h>
 #include <core/resource/media_resource.h>
@@ -22,6 +23,8 @@
 #include <core/resource_management/resource_pool.h>
 #include <nx/utils/scope_guard.h>
 #include <nx/vms/client/core/utils/geometry.h>
+#include <nx/vms/client/desktop/application_context.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/client/desktop/utils/mime_data.h>
 #include <nx/vms/client/desktop/workbench/workbench.h>
@@ -169,6 +172,25 @@ bool DropInstrument::dropEvent(QGraphicsItem* /*item*/, QGraphicsSceneDragDropEv
     {
         NX_ASSERT(false, "Mimedata format could not be changed during drag");
         return false;
+    }
+
+    // In the local player mode files and folders dragged from the OS are added to the playlist
+    // instead of being dropped into the layout.
+    if (qnRuntime->isLocalMode() && mimeData->hasUrls())
+    {
+        QStringList paths;
+        for (const QUrl& url: mimeData->urls())
+        {
+            if (url.isLocalFile())
+                paths.append(url.toLocalFile());
+        }
+
+        if (!paths.isEmpty())
+        {
+            event->acceptProposedAction();
+            appContext()->playlistManager()->addPathsToCurrentPlaylist(paths);
+            return true;
+        }
     }
 
     event->acceptProposedAction();

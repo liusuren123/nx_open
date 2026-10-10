@@ -49,6 +49,24 @@ public:
     /** QML-friendly variant of addPaths() that accepts file/folder dialog URLs. */
     Q_INVOKABLE bool addFiles(const QString& id, const QList<QUrl>& urls);
 
+    /**
+     * Returns the id of the current playlist, creating a default one if no playlist exists yet.
+     */
+    Q_INVOKABLE QString ensureCurrentPlaylist(const QString& name = QString());
+
+    /**
+     * Adds files and/or folders to the current playlist (creating a default one if needed) and
+     * requests playback of the first added entry. Returns the row of the first added entry, or -1
+     * on failure.
+     */
+    Q_INVOKABLE int addPathsToCurrentPlaylist(const QStringList& paths);
+
+    /** QML-friendly variant of addPathsToCurrentPlaylist() that accepts dialog URLs. */
+    Q_INVOKABLE int addFilesToCurrentPlaylist(const QList<QUrl>& urls);
+
+    /** Sorts the entries of the given playlist by file name (case-insensitive, stable). */
+    Q_INVOKABLE bool sortEntriesByName(const QString& id);
+
     Q_INVOKABLE bool removeEntries(const QString& id, const QList<int>& rows);
     Q_INVOKABLE bool moveEntry(const QString& id, int fromRow, int toRow);
     Q_INVOKABLE bool clearEntries(const QString& id);
@@ -63,6 +81,12 @@ signals:
     void playlistsChanged();
     void playlistChanged(const QString& id);
     void currentPlaylistChanged();
+
+    /**
+     * Asks the local player to start playing the given entry of the given playlist. Emitted when
+     * entries are added to the current playlist, so that "open file/folder" starts playback.
+     */
+    void playbackRequested(const QString& playlistId, int row);
 
 private:
     void setPlaylists(const QList<Playlist>& playlists);

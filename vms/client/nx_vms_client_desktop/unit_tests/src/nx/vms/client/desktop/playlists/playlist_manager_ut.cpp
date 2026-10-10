@@ -280,5 +280,103 @@ TEST_F(PlaylistManagerTest, persistsAcrossInstances)
     EXPECT_EQ(m_manager->currentPlaylistId(), id);
 }
 
+TEST_F(PlaylistManagerTest, ensureCurrentPlaylistCreatesDefaultOnce)
+{
+    EXPECT_TRUE(m_manager->currentPlaylistId().isEmpty());
+
+    const QString id = m_manager->ensureCurrentPlaylist();
+    EXPECT_FALSE(id.isEmpty());
+    EXPECT_EQ(m_manager->currentPlaylistId(), id);
+    EXPECT_EQ(m_manager->playlists().size(), 1);
+
+    // A second call returns the existing playlist without creating another one.
+    EXPECT_EQ(m_manager->ensureCurrentPlaylist(), id);
+    EXPECT_EQ(m_manager->playlists().size(), 1);
+}
+
+TEST_F(PlaylistManagerTest, ensureCurrentPlaylistKeepsExisting)
+{
+    const QString created = m_manager->createPlaylist("Existing");
+    EXPECT_EQ(m_manager->ensureCurrentPlaylist(), created);
+    EXPECT_EQ(m_manager->playlists().size(), 1);
+}
+
+TEST_F(PlaylistManagerTest, addPathsToCurrentPlaylistCreatesAndRequestsPlayback)
+{
+    QSignalSpy playbackSpy(m_manager.get(), &PlaylistManager::playbackRequested);
+
+    const QString a = createFile("a.mp4");
+    const QString b = createFile("b.mp4");
+
+    const int firstRow = m_manager->addPathsToCurrentPlaylist({a, b});
+
+    EXPECT_EQ(firstRow, 0);
+    ASSERT_EQ(m_manager->playlists().size(), 1);
+
+    const QString id = m_manager->currentPlaylistId();
+    EXPECT_FALSE(id.isEmpty());
+    EXPECT_EQ(m_manager->playlist(id).entries.size(), 2);
+
+    ASSERT_EQ(playbackSpy.count(), 1);
+    EXPECT_EQ(playbackSpy.at(0).at(0).toString(), id);
+    EXPECT_EQ(playbackSpy.at(0).at(1).toInt(), 0);
+}
+
+TEST_F(PlaylistManagerTest, addPathsToCurrentPlaylistAppendsAndReportsFirstRow)
+{
+    const QString id = m_manager->createPlaylist();
+    m_manager->addPaths(id, {createFile("a.mp4")});
+
+    QSignalSpy playbackSpy(m_manager.get(), &PlaylistManager::playbackRequested);
+
+    const int firstRow = m_manager->addPathsToCurrentPlaylist({createFile("b.mp4")});
+
+    EXPECT_EQ(firstRow, 1);
+    ASSERT_EQ(playbackSpy.count(), 1);
+    EXPECT_EQ(playbackSpy.at(0).at(0).toString(), id);
+    EXPECT_EQ(playbackSpy.at(0).at(1).toInt(), 1);
+}
+
+TEST_F(PlaylistManagerTest, addPathsToCurrentPlaylistIgnoresUnsupported)
+{
+    QSignalSpy playbackSpy(m_manager.get(), &PlaylistManager::playbackRequested);
+
+    // Nothing accepted -> no entry is added and playback is not requested.
+    EXPECT_EQ(m_manager->addPathsToCurrentPlaylist({createFile("readme.txt")}), -1);
+    EXPECT_EQ(playbackSpy.count(), 0);
+}
+
+TEST_F(PlaylistManagerTest, addFilesToCurrentPlaylistAcceptsUrls)
+{
+    const QString video = createFile("url_clip.mkv");
+
+    const int firstRow = m_manager->addFilesToCurrentPlaylist({QUrl::fromLocalFile(video)});
+
+    EXPECT_EQ(firstRow, 0);
+    const auto entries = m_manager->playlist(m_manager->currentPlaylistId()).entries;
+    ASSERT_EQ(entries.size(), 1);
+    EXPECT_FALSE(entries.first().isFolder);
+    EXPECT_EQ(clean(entries.first().path), clean(video));
+}
+
+TEST_F(PlaylistManagerTest, sortEntriesByName)
+{
+    const QString id = m_manager->createPlaylist();
+    const QString b = createFile("b.mp4");
+    const QString a = createFile("a.mp4");
+    const QString c = createFile("C.mp4");
+    ASSERT_TRUE(m_manager->addPaths(id, {b, a, c}));
+
+    EXPECT_TRUE(m_manager->sortEntriesByName(id));
+
+    const auto entries = m_manager->playlist(id).entries;
+    ASSERT_EQ(entries.size(), 3);
+    EXPECT_EQ(QFileInfo(entries[0].path).fileName(), "a.mp4");
+    EXPECT_EQ(QFileInfo(entries[1].path).fileName(), "b.mp4");
+    EXPECT_EQ(QFileInfo(entries[2].path).fileName(), "C.mp4");
+
+    EXPECT_FALSE(m_manager->sortEntriesByName("unknown"));
+}
+
 } // namespace test
 } // namespace nx::vms::client::desktop

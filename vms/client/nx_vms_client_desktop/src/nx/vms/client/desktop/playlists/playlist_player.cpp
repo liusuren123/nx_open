@@ -27,6 +27,12 @@ PlaylistPlayer::PlaylistPlayer(WindowContext* context, QObject* parent):
     QObject(parent),
     WindowContextAware(context)
 {
+    // Start playback when entries are added to the current playlist (e.g. "open file/folder").
+    if (const auto manager = playlistManager())
+    {
+        connect(manager, &PlaylistManager::playbackRequested, this,
+            [this](const QString& playlistId, int row) { playEntry(playlistId, row); });
+    }
 }
 
 void PlaylistPlayer::setCurrentPlaylist(const QString& playlistId)

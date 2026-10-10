@@ -183,6 +183,61 @@ bool PlaylistManager::addFiles(const QString& id, const QList<QUrl>& urls)
     return addPaths(id, paths);
 }
 
+QString PlaylistManager::ensureCurrentPlaylist(const QString& name)
+{
+    const QString id = currentPlaylistId();
+    if (!id.isEmpty())
+        return id;
+
+    return createPlaylist(name.isEmpty() ? tr("Default") : name);
+}
+
+int PlaylistManager::addPathsToCurrentPlaylist(const QStringList& paths)
+{
+    const QString id = ensureCurrentPlaylist();
+    if (id.isEmpty())
+        return -1;
+
+    const int firstRow = playlist(id).entries.size();
+    if (!addPaths(id, paths))
+        return -1;
+
+    emit playbackRequested(id, firstRow);
+    return firstRow;
+}
+
+int PlaylistManager::addFilesToCurrentPlaylist(const QList<QUrl>& urls)
+{
+    QStringList paths;
+    for (const QUrl& url: urls)
+    {
+        const QString path = url.isLocalFile() ? url.toLocalFile() : url.toString();
+        if (!path.isEmpty())
+            paths.append(path);
+    }
+    return addPathsToCurrentPlaylist(paths);
+}
+
+bool PlaylistManager::sortEntriesByName(const QString& id)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    auto& entries = list[index].entries;
+    std::stable_sort(entries.begin(), entries.end(),
+        [](const PlaylistEntry& left, const PlaylistEntry& right)
+        {
+            return QString::compare(QFileInfo(left.path).fileName(),
+                QFileInfo(right.path).fileName(), Qt::CaseInsensitive) < 0;
+        });
+
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
 bool PlaylistManager::setEntries(const QString& id, const QList<PlaylistEntry>& entries)
 {
     auto list = playlists();

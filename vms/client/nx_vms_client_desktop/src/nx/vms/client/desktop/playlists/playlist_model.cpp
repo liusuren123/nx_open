@@ -47,19 +47,53 @@ void PlaylistModel::setPlaylistId(const QString& id)
     emit playlistIdChanged();
 }
 
+QString PlaylistModel::filter() const
+{
+    return m_filter;
+}
+
+void PlaylistModel::setFilter(const QString& filter)
+{
+    if (m_filter == filter)
+        return;
+
+    m_filter = filter;
+    refresh();
+    emit filterChanged();
+}
+
+void PlaylistModel::rebuildFilteredRows()
+{
+    m_filteredRows.clear();
+
+    const auto playlistManager = manager();
+    if (!playlistManager || m_playlistId.isEmpty())
+        return;
+
+    const auto entries = playlistManager->playlist(m_playlistId).entries;
+    for (int row = 0; row < static_cast<int>(entries.size()); ++row)
+    {
+        if (m_filter.isEmpty()
+            || QFileInfo(entries.at(row).path).fileName().contains(m_filter, Qt::CaseInsensitive))
+        {
+            m_filteredRows.append(row);
+        }
+    }
+}
+
 void PlaylistModel::refresh()
 {
+    rebuildFilteredRows();
     beginResetModel();
     endResetModel();
 }
 
 int PlaylistModel::rowCount(const QModelIndex& parent) const
 {
-    const auto playlistManager = manager();
-    if (parent.isValid() || !playlistManager || m_playlistId.isEmpty())
+    if (parent.isValid())
         return 0;
 
-    return playlistManager->playlist(m_playlistId).entries.size();
+    return m_filteredRows.size();
 }
 
 QVariant PlaylistModel::data(const QModelIndex& index, int role) const
@@ -68,11 +102,15 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
     if (!index.isValid() || !playlistManager)
         return {};
 
-    const auto playlist = playlistManager->playlist(m_playlistId);
-    if (index.row() < 0 || index.row() >= playlist.entries.size())
+    if (index.row() < 0 || index.row() >= m_filteredRows.size())
         return {};
 
-    const auto& entry = playlist.entries.at(index.row());
+    const auto playlist = playlistManager->playlist(m_playlistId);
+    const int sourceRow = m_filteredRows.at(index.row());
+    if (sourceRow < 0 || sourceRow >= playlist.entries.size())
+        return {};
+
+    const auto& entry = playlist.entries.at(sourceRow);
     switch (role)
     {
         case FileNameRole:

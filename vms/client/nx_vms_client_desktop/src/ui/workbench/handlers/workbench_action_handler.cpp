@@ -88,6 +88,7 @@
 #include <nx/vms/client/desktop/layout/layout_data_helper.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/network/cloud_url_validator.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/resource/layout_password_management.h>
 #include <nx/vms/client/desktop/resource/resource_access_manager.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
@@ -1817,18 +1818,38 @@ void ActionHandler::at_openFileAction_triggered()
         nullptr,
         QnCustomFileDialog::fileDialogOptions());
 
-    if (!files.isEmpty())
-        menu()->trigger(menu::DropResourcesAction, addToResourcePool(files));
+    if (files.isEmpty())
+        return;
+
+    // In the local player mode files go to the playlist instead of being dropped into the layout
+    // as individual items, which matches the behavior of a conventional media player.
+    if (qnRuntime->isLocalMode())
+    {
+        appContext()->playlistManager()->addPathsToCurrentPlaylist(files);
+        return;
+    }
+
+    menu()->trigger(menu::DropResourcesAction, addToResourcePool(files));
 }
 
 void ActionHandler::at_openFolderAction_triggered() {
-    QString dirName = QFileDialog::getExistingDirectory(mainWindowWidget(),
+    const QString dirName = QFileDialog::getExistingDirectory(mainWindowWidget(),
         tr("Select Folder..."),
         QString(),
         QnCustomFileDialog::directoryDialogOptions());
 
-    if (!dirName.isEmpty())
-        menu()->trigger(menu::DropResourcesAction, addToResourcePool(dirName));
+    if (dirName.isEmpty())
+        return;
+
+    // In the local player mode the whole folder becomes a playlist entry instead of a set of
+    // layout items; the folder is scanned recursively when played.
+    if (qnRuntime->isLocalMode())
+    {
+        appContext()->playlistManager()->addPathsToCurrentPlaylist({dirName});
+        return;
+    }
+
+    menu()->trigger(menu::DropResourcesAction, addToResourcePool(dirName));
 }
 
 void ActionHandler::at_closeAllVideosAction_triggered() {

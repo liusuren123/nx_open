@@ -31,6 +31,7 @@
 #include <nx/vms/client/core/utils/geometry.h>
 #include <nx/vms/client/core/watchers/server_time_watcher.h>
 #include <nx/vms/client/desktop/application_context.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/common/utils/audio_dispatcher.h>
 #include <nx/vms/client/desktop/debug_utils/menu/debug_actions_handler.h>
 #include <nx/vms/client/desktop/export/workbench/workbench_export_handler.h>
@@ -717,6 +718,11 @@ void MainWindow::minimize() {
 bool MainWindow::handleOpenFile(const QString &message)
 {
     const auto files = message.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+
+    // In the local player mode opened files are added to the playlist instead of the layout.
+    if (qnRuntime->isLocalMode())
+        return appContext()->playlistManager()->addPathsToCurrentPlaylist(files) >= 0;
+
     const auto resources = QnFileProcessor::createResourcesForFiles(
         QnFileProcessor::findAcceptedFiles(files),
         system()->resourcePool());

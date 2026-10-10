@@ -15,6 +15,30 @@ Item
     property alias scene: resourceTree.scene
     property alias tree: resourceTree
 
+    property bool playlistTabAutoSelected: false
+
+    // In the local player mode the resource tree is empty, so the Playlist tab is shown first.
+    function autoSelectPlaylistTab()
+    {
+        if (playlistTabAutoSelected || !resourceTree.localFilesMode)
+            return
+
+        playlistTabAutoSelected = true
+        tabControl.currentTabIndex = 1
+    }
+
+    Component.onCompleted: autoSelectPlaylistTab()
+
+    Connections
+    {
+        target: resourceTree
+
+        function onLocalFilesModeChanged()
+        {
+            resourcesPanel.autoSelectPlaylistTab()
+        }
+    }
+
     clip: true
 
     function clearFilters()

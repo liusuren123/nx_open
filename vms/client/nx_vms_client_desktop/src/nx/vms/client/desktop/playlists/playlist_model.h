@@ -17,6 +17,7 @@ class PlaylistModel: public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(QString playlistId READ playlistId WRITE setPlaylistId NOTIFY playlistIdChanged)
+    Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
 
 public:
     enum Role
@@ -32,6 +33,9 @@ public:
     QString playlistId() const;
     void setPlaylistId(const QString& id);
 
+    QString filter() const;
+    void setFilter(const QString& filter);
+
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
@@ -40,12 +44,16 @@ public:
 
 signals:
     void playlistIdChanged();
+    void filterChanged();
 
 private:
     PlaylistManager* manager() const;
     void refresh();
+    void rebuildFilteredRows();
 
     QString m_playlistId;
+    QString m_filter;
+    QList<int> m_filteredRows;
 };
 
 } // namespace nx::vms::client::desktop
