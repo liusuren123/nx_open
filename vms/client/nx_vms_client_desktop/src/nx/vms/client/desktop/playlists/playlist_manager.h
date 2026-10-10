@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <QtCore/QHash>
 #include <QtCore/QObject>
+#include <QtCore/QSet>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
@@ -83,6 +85,12 @@ public:
     /** Recursively expands all entries into an ordered list of playable media file paths. */
     static QStringList expandedFilePaths(const Playlist& playlist);
 
+    /**
+     * Duration of the media file in milliseconds, or -1 if it is not known (yet). The first call
+     * starts a background probe and returns -1; the result is then reported via durationChanged().
+     */
+    qint64 durationMs(const QString& path) const;
+
 signals:
     void playlistsChanged();
     void playlistChanged(const QString& id);
@@ -94,10 +102,21 @@ signals:
      */
     void playbackRequested(const QString& playlistId, int row);
 
+    /** Emitted when the duration of a media file has been probed. -1 means "unknown". */
+    void durationChanged(const QString& path, qint64 durationMs);
+
 private:
     void setPlaylists(const QList<Playlist>& playlists);
 
+    void requestDuration(const QString& path) const;
+    void onDurationProbed(const QString& path, qint64 durationMs);
+
     LocalSettings* const m_settings;
+
+    // Media durations are probed in the background and cached by path; accessed from the GUI thread
+    // only, so the const durationMs() has to be allowed to fill them in.
+    mutable QHash<QString, qint64> m_durations;
+    mutable QSet<QString> m_pendingDurations;
 };
 
 } // namespace nx::vms::client::desktop

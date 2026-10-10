@@ -44,6 +44,23 @@ Item
         playlistPlayer.playEntry(PlaylistManager.currentPlaylistId, row)
     }
 
+    /** Formats a duration given in milliseconds as "mm:ss" or "h:mm:ss"; empty for unknown. */
+    function formatDuration(ms)
+    {
+        if (ms === undefined || ms === null || ms < 0)
+            return ""
+
+        const totalSeconds = Math.floor(ms / 1000)
+        const seconds = totalSeconds % 60
+        const minutes = Math.floor(totalSeconds / 60) % 60
+        const hours = Math.floor(totalSeconds / 3600)
+        const pad = (value) => (value < 10 ? "0" + value : "" + value)
+
+        return hours > 0
+            ? hours + ":" + pad(minutes) + ":" + pad(seconds)
+            : pad(minutes) + ":" + pad(seconds)
+    }
+
     function playPrevious()
     {
         if (typeof playlistPlayer === "undefined" || !playlistPlayer)
@@ -275,44 +292,59 @@ Item
                 }
             }
 
-            Row
+            Text
             {
-                anchors.fill: parent
+                id: entryIndex
+
+                anchors.left: parent.left
                 anchors.leftMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                width: 26
+                text: index + 1
+                color: ColorTheme.colors.light12
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                font.pixelSize: 12
+            }
+
+            Image
+            {
+                id: entryIcon
+
+                anchors.left: entryIndex.right
+                anchors.leftMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                width: 16
+                height: 16
+                sourceSize: Qt.size(16, 16)
+                source: isFolder
+                    ? "image://skin/20x20/Outline/folder.svg?primary=light12"
+                    : "image://skin/20x20/Outline/play.svg?primary=light12"
+            }
+
+            Text
+            {
+                id: entryDuration
+
+                anchors.right: parent.right
                 anchors.rightMargin: 8
-                spacing: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: playlistBrowser.formatDuration(durationMs)
+                color: ColorTheme.colors.light12
+                font.pixelSize: 11
+            }
 
-                Text
-                {
-                    width: 26
-                    text: index + 1
-                    color: ColorTheme.colors.light12
-                    horizontalAlignment: Text.AlignRight
-                    elide: Text.ElideRight
-                    anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: 12
-                }
-
-                Image
-                {
-                    width: 16
-                    height: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    sourceSize: Qt.size(16, 16)
-                    source: isFolder
-                        ? "image://skin/20x20/Outline/folder.svg?primary=light12"
-                        : "image://skin/20x20/Outline/play.svg?primary=light12"
-                }
-
-                Text
-                {
-                    width: parent.width - 26 - 16 - parent.spacing * 3
-                    text: fileName
-                    color: ColorTheme.colors.light12
-                    elide: Text.ElideMiddle
-                    anchors.verticalCenter: parent.verticalCenter
-                    font.pixelSize: 12
-                }
+            Text
+            {
+                anchors.left: entryIcon.right
+                anchors.leftMargin: 6
+                anchors.right: entryDuration.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: fileName
+                color: ColorTheme.colors.light12
+                elide: Text.ElideMiddle
+                font.pixelSize: 12
             }
         }
     }

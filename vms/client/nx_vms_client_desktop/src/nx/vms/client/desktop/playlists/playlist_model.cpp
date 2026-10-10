@@ -24,6 +24,9 @@ PlaylistModel::PlaylistModel(QObject* parent):
 
         connect(playlistManager, &PlaylistManager::playlistsChanged,
             this, &PlaylistModel::refresh);
+
+        connect(playlistManager, &PlaylistManager::durationChanged,
+            this, &PlaylistModel::onDurationChanged);
     }
 }
 
@@ -122,6 +125,9 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
         case IsFolderRole:
             return entry.isFolder;
 
+        case DurationMsRole:
+            return entry.isFolder ? qint64(-1) : playlistManager->durationMs(entry.path);
+
         default:
             return {};
     }
@@ -133,7 +139,20 @@ QHash<int, QByteArray> PlaylistModel::roleNames() const
         {FileNameRole, "fileName"},
         {FilePathRole, "filePath"},
         {IsFolderRole, "isFolder"},
+        {DurationMsRole, "durationMs"},
     };
+}
+
+void PlaylistModel::onDurationChanged(const QString& path)
+{
+    for (int row = 0; row < m_filteredRows.size(); ++row)
+    {
+        const QModelIndex modelIndex = index(row, 0);
+        if (data(modelIndex, FilePathRole).toString() != path)
+            continue;
+
+        emit dataChanged(modelIndex, modelIndex, {DurationMsRole});
+    }
 }
 
 void PlaylistModel::registerQmlType()

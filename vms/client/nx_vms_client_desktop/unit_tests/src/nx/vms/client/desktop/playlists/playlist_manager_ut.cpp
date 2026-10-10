@@ -392,5 +392,28 @@ TEST_F(PlaylistManagerTest, currentPlaylistName)
     EXPECT_TRUE(m_manager->currentPlaylistName().isEmpty());
 }
 
+TEST_F(PlaylistManagerTest, durationOfEmptyPathIsUnknown)
+{
+    EXPECT_EQ(m_manager->durationMs(QString()), -1);
+}
+
+TEST_F(PlaylistManagerTest, durationOfNonMediaFileStaysUnknown)
+{
+    const QString path = createFile("not_media.mp4");
+
+    QSignalSpy spy(m_manager.get(), &PlaylistManager::durationChanged);
+
+    // The first call starts a background probe and reports "unknown" right away.
+    EXPECT_EQ(m_manager->durationMs(path), -1);
+
+    ASSERT_TRUE(spy.wait(15000));
+    EXPECT_EQ(spy.at(0).at(0).toString(), path);
+    EXPECT_EQ(spy.at(0).at(1).toLongLong(), -1);
+
+    // The result is cached now, so asking again does not start another probe.
+    EXPECT_EQ(m_manager->durationMs(path), -1);
+    EXPECT_FALSE(spy.wait(500));
+}
+
 } // namespace test
 } // namespace nx::vms::client::desktop

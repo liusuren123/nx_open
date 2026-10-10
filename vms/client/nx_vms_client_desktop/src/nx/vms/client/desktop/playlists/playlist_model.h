@@ -25,6 +25,7 @@ public:
         FileNameRole = Qt::UserRole + 1,
         FilePathRole,
         IsFolderRole,
+        DurationMsRole,
     };
     Q_ENUM(Role)
 
@@ -50,6 +51,7 @@ private:
     PlaylistManager* manager() const;
     void refresh();
     void rebuildFilteredRows();
+    void onDurationChanged(const QString& path);
 
     QString m_playlistId;
     QString m_filter;

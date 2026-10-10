@@ -5,8 +5,15 @@
 #include <algorithm>
 #include <functional>
 
+extern "C" {
+#include <libavformat/avformat.h>
+}
+
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QPointer>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <core/resource/file_processor.h>
 #include <nx/utils/property_storage/property.h>
@@ -39,6 +46,30 @@ nx::Uuid fromId(const QString& id)
 QString normalizedPath(const QString& path)
 {
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
+
+/**
+ * Reads the duration of a media file with ffmpeg. Runs in a worker thread; does not decode any
+ * frames, only the container header (and stream info when the header has no duration).
+ */
+qint64 probeMediaDurationMs(const QString& path)
+{
+    AVFormatContext* context = nullptr;
+    const QByteArray fileName = path.toUtf8();
+    if (avformat_open_input(&context, fileName.constData(), nullptr, nullptr) < 0)
+        return -1;
+
+    // Most containers expose the duration right from the header; read the streams only when it is
+    // missing.
+    if (context->duration == AV_NOPTS_VALUE || context->duration <= 0)
+        avformat_find_stream_info(context, nullptr);
+
+    qint64 result = -1;
+    if (context->duration != AV_NOPTS_VALUE && context->duration > 0)
+        result = context->duration / (AV_TIME_BASE / 1000);
+
+    avformat_close_input(&context);
+    return result;
 }
 
 } // namespace
@@ -327,6 +358,50 @@ QStringList PlaylistManager::expandedFilePaths(const Playlist& playlist)
     for (const auto& entry: playlist.entries)
         result.append(QnFileProcessor::findAcceptedFiles(entry.path));
     return result;
+}
+
+qint64 PlaylistManager::durationMs(const QString& path) const
+{
+    if (path.isEmpty())
+        return -1;
+
+    const auto it = m_durations.constFind(path);
+    if (it != m_durations.constEnd())
+        return it.value();
+
+    if (!m_pendingDurations.contains(path))
+        requestDuration(path);
+
+    return -1;
+}
+
+void PlaylistManager::requestDuration(const QString& path) const
+{
+    m_pendingDurations.insert(path);
+
+    auto* const self = const_cast<PlaylistManager*>(this);
+    const QPointer<PlaylistManager> guard(self);
+    QtConcurrent::run([guard, path]()
+    {
+        const qint64 duration = probeMediaDurationMs(path);
+        if (!guard)
+            return;
+
+        QMetaObject::invokeMethod(guard.data(),
+            [guard, path, duration]()
+            {
+                if (guard)
+                    guard->onDurationProbed(path, duration);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void PlaylistManager::onDurationProbed(const QString& path, qint64 duration)
+{
+    m_pendingDurations.remove(path);
+    m_durations.insert(path, duration);
+    emit durationChanged(path, duration);
 }
 
 } // namespace nx::vms::client::desktop
