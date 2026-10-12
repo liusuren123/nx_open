@@ -1844,8 +1844,8 @@ void ActionHandler::at_openFolderAction_triggered() {
     if (dirName.isEmpty())
         return;
 
-    // In the local player mode the whole folder becomes a playlist entry instead of a set of
-    // layout items; the folder is scanned recursively when played.
+    // In the local player mode the folder is expanded into its media files and added to the
+    // playlist instead of being dropped into the layout as a set of items.
     if (qnRuntime->isLocalMode())
     {
         appContext()->playlistManager()->addPathsToCurrentPlaylist({dirName});

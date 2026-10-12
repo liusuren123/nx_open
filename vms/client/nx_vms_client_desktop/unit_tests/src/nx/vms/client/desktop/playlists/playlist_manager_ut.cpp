@@ -139,24 +139,29 @@ TEST_F(PlaylistManagerTest, renamePlaylist)
     EXPECT_FALSE(m_manager->renamePlaylist("unknown", "Name"));
 }
 
-TEST_F(PlaylistManagerTest, addPathsDetectsFilesAndFolders)
+TEST_F(PlaylistManagerTest, addPathsExpandsFoldersIntoFiles)
 {
     const QString id = m_manager->createPlaylist();
-    const QString video = createFile("clip.mp4");
-    const QString text = createFile("notes.txt");
-    const QString folder = mediaDir() + "/sub";
-    QDir().mkpath(folder);
+    const QString text = createFile("folder/notes.txt");
+    const QString first = createFile("folder/first.mp4");
+    const QString second = createFile("folder/second.mkv");
+    const QString nested = createFile("folder/nested/third.mp4");
+    const QString folder = mediaDir() + "/folder";
 
-    EXPECT_TRUE(m_manager->addPaths(id, {video, text, folder}));
+    EXPECT_TRUE(m_manager->addPaths(id, {text, folder}));
 
     const auto entries = m_manager->playlist(id).entries;
-    ASSERT_EQ(entries.size(), 2); // The .txt file is filtered out.
+    ASSERT_EQ(entries.size(), 3); // The .txt file is filtered out; the folder is expanded.
 
-    EXPECT_FALSE(entries[0].isFolder);
-    EXPECT_EQ(clean(entries[0].path), clean(video));
-
-    EXPECT_TRUE(entries[1].isFolder);
-    EXPECT_EQ(clean(entries[1].path), clean(folder));
+    QStringList paths;
+    for (const auto& entry: entries)
+    {
+        EXPECT_FALSE(entry.isFolder);
+        paths.append(clean(entry.path));
+    }
+    EXPECT_TRUE(paths.contains(clean(first)));
+    EXPECT_TRUE(paths.contains(clean(second)));
+    EXPECT_TRUE(paths.contains(clean(nested)));
 }
 
 TEST_F(PlaylistManagerTest, addPathsRejectsUnsupportedFiles)

@@ -188,11 +188,11 @@ bool PlaylistManager::addPaths(const QString& id, const QStringList& paths)
     QList<PlaylistEntry> entries;
     for (const QString& path: paths)
     {
-        const QFileInfo info(path);
-        if (info.isDir())
-            entries.append({normalizedPath(path), /*isFolder*/ true});
-        else if (info.isFile() && !QnFileProcessor::findAcceptedFiles(path).isEmpty())
-            entries.append({normalizedPath(path), /*isFolder*/ false});
+        // Folders are expanded into the media files they contain (recursively), so that every video
+        // gets its own playlist row, like in a conventional media player. For a single file this
+        // yields just that file, and unsupported files are filtered out.
+        for (const QString& file: QnFileProcessor::findAcceptedFiles(path))
+            entries.append({normalizedPath(file), /*isFolder*/ false});
     }
 
     if (entries.isEmpty())

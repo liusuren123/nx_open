@@ -51,7 +51,10 @@ public:
     Q_INVOKABLE bool removePlaylist(const QString& id);
     Q_INVOKABLE bool renamePlaylist(const QString& id, const QString& name);
 
-    /** Adds files and/or folders, detecting the kind of each path and filtering media files. */
+    /**
+     * Adds files and/or folders, expanding folders into the media files they contain (recursively)
+     * and filtering out unsupported files.
+     */
     Q_INVOKABLE bool addPaths(const QString& id, const QStringList& paths);
 
     /** QML-friendly variant of addPaths() that accepts file/folder dialog URLs. */
