@@ -99,6 +99,7 @@
 #include <utils/math/color_transformations.h>
 
 #if defined(Q_OS_WIN)
+    #include <nx/vms/client/desktop/resource/local_camera/local_camera_resource_searcher.h>
     #include <nx/vms/client/desktop/resource/screen_recording/audio_video_win/windows_desktop_resource_searcher_impl.h>
 #endif
 
@@ -376,6 +377,7 @@ struct ApplicationContext::Private
     std::unique_ptr<WebPageDataCache> webPageDataCache;
     std::unique_ptr<QnQtbugWorkaround> qtBugWorkarounds;
     std::unique_ptr<core::DesktopResourceSearcher> desktopResourceSearcher;
+    std::unique_ptr<core::DesktopResourceSearcher> localCameraResourceSearcher;
     std::unique_ptr<nx::vms::client::desktop::joystick::Manager> joystickManager;
     std::unique_ptr<nx::vms::client::desktop::AudioVideoInput> audioVideoInput;
 
@@ -835,6 +837,7 @@ ApplicationContext::~ApplicationContext()
 {
     // For now it depends on a System Context, later it will be moved to the Local System Context.
     d->desktopResourceSearcher.reset();
+    d->localCameraResourceSearcher.reset();
 
     // Local resources context temporary implementation depends on main system context.
     d->localResourcesContext.reset();
@@ -913,6 +916,14 @@ void ApplicationContext::initializeDesktopCamera([[maybe_unused]] QOpenGLWidget*
         currentSystemContext()); //< TODO: #sivanov Use the same system context as for local files.
     d->desktopResourceSearcher->setLocal(true);
     resourceDiscoveryManager()->addDeviceSearcher(d->desktopResourceSearcher.get());
+
+    // Local capture devices (USB / built-in cameras) are exposed as client-side live cameras, so
+    // they can be watched without a media server.
+    d->localCameraResourceSearcher = std::make_unique<core::DesktopResourceSearcher>(
+        new LocalCameraResourceSearcherImpl(),
+        currentSystemContext());
+    d->localCameraResourceSearcher->setLocal(true);
+    resourceDiscoveryManager()->addDeviceSearcher(d->localCameraResourceSearcher.get());
 #endif
 }
 
