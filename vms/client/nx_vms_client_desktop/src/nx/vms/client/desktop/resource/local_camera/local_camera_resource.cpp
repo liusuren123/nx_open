@@ -33,7 +33,7 @@ bool LocalCameraResource::hasVideo(const QnAbstractStreamDataProvider*) const
 QnAbstractStreamDataProvider* LocalCameraResource::createDataProvider(Qn::ConnectionRole)
 {
     // According to the legacy design, the caller retains ownership of the created object.
-    return new LocalCameraDataProvider(getName());
+    return new LocalCameraDataProvider(toSharedPointer(this), getName());
 }
 
 QnConstResourceVideoLayoutPtr LocalCameraResource::getVideoLayout(const QnAbstractStreamDataProvider*)

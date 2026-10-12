@@ -30,8 +30,9 @@ struct LocalCameraDataProvider::Private
     QString lastError;
 };
 
-LocalCameraDataProvider::LocalCameraDataProvider(const QString& deviceName, QObject* parent):
-    base_type(),
+LocalCameraDataProvider::LocalCameraDataProvider(
+    const QnResourcePtr& resource, const QString& deviceName, QObject* parent):
+    base_type(resource),
     d(new Private{deviceName})
 {
     setObjectName("LocalCameraDataProvider");

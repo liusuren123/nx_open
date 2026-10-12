@@ -4,7 +4,7 @@
 
 #include <QtCore/QString>
 
-#include <nx/streaming/abstract_stream_data_provider.h>
+#include <nx/streaming/abstract_media_stream_data_provider.h>
 #include <nx/utils/impl_ptr.h>
 
 namespace nx::vms::client::desktop {
@@ -19,13 +19,14 @@ namespace nx::vms::client::desktop {
  * Packets are marked with MediaFlags_LIVE and timestamped with the wall clock, so the client treats
  * the feed as a live camera rather than an archive.
  */
-class LocalCameraDataProvider: public QnAbstractStreamDataProvider
+class LocalCameraDataProvider: public QnAbstractMediaStreamDataProvider
 {
     Q_OBJECT
-    using base_type = QnAbstractStreamDataProvider;
+    using base_type = QnAbstractMediaStreamDataProvider;
 
 public:
-    explicit LocalCameraDataProvider(const QString& deviceName, QObject* parent = nullptr);
+    LocalCameraDataProvider(
+        const QnResourcePtr& resource, const QString& deviceName, QObject* parent = nullptr);
     virtual ~LocalCameraDataProvider() override;
 
     virtual void start(Priority priority = InheritPriority) override;
