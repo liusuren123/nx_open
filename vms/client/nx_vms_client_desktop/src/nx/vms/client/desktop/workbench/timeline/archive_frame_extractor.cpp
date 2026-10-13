@@ -18,6 +18,7 @@
 #include <nx/streaming/abstract_archive_delegate.h>
 #include <nx/streaming/rtsp_client_archive_delegate.h>
 #include <nx/utils/log/assert.h>
+#include <nx/utils/log/log.h>
 #include <nx/vms/client/core/network/remote_connection.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <utils/common/delayed.h>
@@ -371,6 +372,15 @@ ArchiveFrameExtractor::ArchiveFrameExtractor(
         d->streamWorker.archiveDelegate.reset(aviResource->createArchiveDelegate());
     }
 
+    if (!d->streamWorker.archiveDelegate)
+    {
+        // Some media resources, e.g. client-side live cameras, provide neither an RTSP backend nor
+        // a local file, so there is nothing to extract frames from.
+        NX_WARNING(this, "Unable to create an archive delegate for resource '%1', "
+            "frame extraction is not available.", mediaResource->getName());
+        return;
+    }
+
     static constexpr auto kAutoSize = QSize(-1, 0);
     const MediaQuality mediaQuality = videQuality == VideoQuality::low
         ? MEDIA_Quality_Low
@@ -415,6 +425,9 @@ void ArchiveFrameExtractor::setScaleSize(const QSize& size)
 
 void ArchiveFrameExtractor::requestFrame(const Request& request)
 {
+    if (!d->streamWorker.thread)
+        return; //< Frame extraction is not available for this resource.
+
     {
         std::lock_guard<std::mutex> lock(d->streamWorker.mutex);
         d->streamWorker.requestQueue.push_back(request);

@@ -2400,6 +2400,11 @@ void QnWorkbenchNavigator::updateThumbnailsLoader()
             if (widget->channelCount() > 1)
                 return false;
 
+            // Thumbnails are only available for resources that can provide recorded content,
+            // i.e. cameras and local media files.
+            if (!core::CachingCameraDataLoader::supportedResource(widget->resource()))
+                return false;
+
             if (const auto camera = widget->resource().dynamicCast<QnVirtualCameraResource>())
             {
                 if (!ResourceAccessManager::hasPermissions(camera, Qn::ViewFootagePermission))
@@ -2436,7 +2441,8 @@ void QnWorkbenchNavigator::updateThumbnailsLoader()
         }
 
         const auto cameraDataLoader = loaderByWidget(m_currentMediaWidget);
-        if (cameraDataLoader->allowedContent().contains(Qn::RecordingContent))
+        if (cameraDataLoader
+            && cameraDataLoader->allowedContent().contains(Qn::RecordingContent))
         {
             m_timeSlider->thumbnailLoadingManager()->setRecordedTimePeriods(
                 cameraDataLoader->periods(Qn::RecordingContent));

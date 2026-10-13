@@ -11,7 +11,7 @@ namespace nx::vms::client::desktop {
 
 /**
  * A live camera provided by the client itself, without a media server. Video comes from a local
- * capture device (USB / built-in camera) opened by LocalCameraDataProvider.
+ * capture device (USB / built-in camera) opened by LocalCameraArchiveDelegate.
  *
  * The resource carries the Qn::local_live_cam flag, so the media pipeline treats it as a live
  * stream, as opposed to QnAviResource, which is an archive (a local file).
