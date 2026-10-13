@@ -26,7 +26,10 @@ public:
     explicit LocalCameraManager(LocalSettings* settings, QObject* parent = nullptr);
     virtual ~LocalCameraManager() override;
 
-    /** Configured sources as a list of { id, name, url } maps. */
+    /**
+     * Configured sources as a list of { id, name, url, username } maps. The password is deliberately
+     * not exposed; the URL is stripped of any embedded credentials.
+     */
     QVariantList sources() const;
 
     /**
@@ -35,6 +38,14 @@ public:
      * URL only when the stream is opened. Returns whether the source list was changed.
      */
     Q_INVOKABLE bool addSource(const QString& name, const QString& url,
+        const QString& username, const QString& password);
+
+    /**
+     * Updates the source with the given id. An empty URL, an unknown id, or a URL already used by
+     * another source is rejected. An empty password keeps the stored one, so it survives an edit
+     * without being exposed to the dialog. Returns whether the source list was changed.
+     */
+    Q_INVOKABLE bool updateSource(const QString& id, const QString& name, const QString& url,
         const QString& username, const QString& password);
 
     /** Removes the source with the given id. Returns whether it was found. */

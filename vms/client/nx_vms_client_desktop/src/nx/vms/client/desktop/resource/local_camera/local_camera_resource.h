@@ -43,6 +43,12 @@ public:
     /** Id of the configuring LocalCameraSource entry; null for capture devices. */
     const nx::Uuid& sourceId() const { return m_sourceId; }
 
+    /**
+     * Refreshes a URL resource after its configuring LocalCameraSource was edited, so the new name
+     * and URL are picked up. Does nothing for capture devices.
+     */
+    void updateFromSource(const LocalCameraSource& source);
+
     /** Deterministic resource id for the given device id. */
     static nx::Uuid resourceIdForDevice(const QString& deviceId);
 

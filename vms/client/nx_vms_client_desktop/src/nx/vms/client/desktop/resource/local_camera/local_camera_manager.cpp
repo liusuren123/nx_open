@@ -47,10 +47,13 @@ QVariantList LocalCameraManager::sources() const
 
     for (const LocalCameraSource& source: m_settings->localCameraSources())
     {
-        // The URL is deliberately not exposed: it may embed credentials.
+        // The password is deliberately not exposed, and the URL is stripped of any embedded
+        // credentials, so nothing sensitive can leak into the dialog.
         result.append(QVariantMap{
             {"id", source.id.toString()},
-            {"name", source.displayName()}});
+            {"name", source.name}, //< Raw name, may be empty; the UI falls back to the URL.
+            {"url", localCameraSourceUrlForDisplay(source.url)},
+            {"username", source.username}});
     }
 
     return result;
@@ -80,6 +83,49 @@ bool LocalCameraManager::addSource(const QString& name, const QString& url,
     source.username = username.trimmed();
     source.password = password;
     list.append(source);
+
+    m_settings->localCameraSources = list; //< Emits changed => syncPool().
+    return true;
+}
+
+bool LocalCameraManager::updateSource(const QString& id, const QString& name, const QString& url,
+    const QString& username, const QString& password)
+{
+    if (!m_settings)
+        return false;
+
+    const nx::Uuid uuid = id.isEmpty() ? nx::Uuid() : nx::Uuid::fromStringSafe(id);
+    if (uuid.isNull())
+        return false;
+
+    const QString trimmedUrl = url.trimmed();
+    if (trimmedUrl.isEmpty())
+        return false;
+
+    auto list = m_settings->localCameraSources();
+
+    int index = -1;
+    for (int i = 0; i < list.size(); ++i)
+    {
+        if (list[i].id == uuid)
+        {
+            index = i;
+            continue;
+        }
+
+        if (list[i].url.compare(trimmedUrl, Qt::CaseInsensitive) == 0)
+            return false; //< Another source already uses this URL.
+    }
+
+    if (index < 0)
+        return false;
+
+    LocalCameraSource& source = list[index];
+    source.name = name.trimmed();
+    source.url = trimmedUrl;
+    source.username = username.trimmed();
+    if (!password.isEmpty())
+        source.password = password; //< An empty password keeps the stored one.
 
     m_settings->localCameraSources = list; //< Emits changed => syncPool().
     return true;
@@ -127,11 +173,17 @@ void LocalCameraManager::syncPool()
     for (const LocalCameraSource& source: configured)
         configuredIds.insert(source.id);
 
-    // Add resources for the configured sources that are not in the pool yet.
+    // Add resources for the configured sources that are not in the pool yet, and refresh the ones
+    // that changed (e.g. after an edit), so the tree and the streams pick up the new values.
     for (const LocalCameraSource& source: configured)
     {
-        if (pool->getResourceById(source.id))
+        if (const auto existing = pool->getResourceById(source.id))
+        {
+            if (const auto urlResource = existing.dynamicCast<LocalCameraResource>())
+                urlResource->updateFromSource(source);
+
             continue;
+        }
 
         pool->addResources(QnResourceList{QnResourcePtr(new LocalCameraResource(source))});
     }

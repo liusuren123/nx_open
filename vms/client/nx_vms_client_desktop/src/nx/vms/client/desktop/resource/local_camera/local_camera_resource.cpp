@@ -35,6 +35,16 @@ LocalCameraResource::LocalCameraResource(const LocalCameraSource& source):
     setIdUnsafe(source.id);
 }
 
+void LocalCameraResource::updateFromSource(const LocalCameraSource& source)
+{
+    if (!isUrlSource())
+        return; //< Capture devices are not backed by a LocalCameraSource.
+
+    m_url = source.streamUrl();
+    setName(source.displayName());
+    setUrl(source.displayName());
+}
+
 nx::Uuid LocalCameraResource::resourceIdForDevice(const QString& deviceId)
 {
     return nx::Uuid::fromArbitraryData("nx_local_camera:" + deviceId);
