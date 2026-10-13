@@ -47,10 +47,10 @@ QVariantList LocalCameraManager::sources() const
 
     for (const LocalCameraSource& source: m_settings->localCameraSources())
     {
+        // The URL is deliberately not exposed: it may embed credentials.
         result.append(QVariantMap{
             {"id", source.id.toString()},
-            {"name", source.name},
-            {"url", source.url}});
+            {"name", source.displayName()}});
     }
 
     return result;
@@ -74,7 +74,7 @@ bool LocalCameraManager::addSource(const QString& name, const QString& url)
 
     LocalCameraSource source;
     source.id = nx::Uuid::createUuid();
-    source.name = name.trimmed().isEmpty() ? trimmedUrl : name.trimmed();
+    source.name = name.trimmed(); //< May be empty: the name is then derived from the URL.
     source.url = trimmedUrl;
     list.append(source);
 

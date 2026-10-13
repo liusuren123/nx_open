@@ -21,9 +21,9 @@ Dialog
     title: qsTr("Local Video Sources")
 
     width: 520
-    height: 440
+    height: 480
     minimumWidth: 520
-    minimumHeight: 440
+    minimumHeight: 480
 
     modality: Qt.ApplicationModal
 
@@ -59,7 +59,7 @@ Dialog
             id: sourceList
 
             width: parent.width
-            height: 180
+            height: 160
             clip: true
             contentWidth: width
             contentHeight: sourceColumn.height
@@ -80,32 +80,21 @@ Dialog
                     delegate: Item
                     {
                         width: sourceColumn.width
-                        height: 46
+                        height: 30
 
-                        Column
+                        Text
                         {
                             anchors.left: parent.left
                             anchors.right: removeButton.left
                             anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
 
-                            Text
-                            {
-                                width: parent.width
-                                text: modelData ? modelData.name : ""
-                                color: ColorTheme.colors.light4
-                                font.pixelSize: FontConfig.normal.pixelSize
-                                elide: Text.ElideRight
-                            }
-
-                            Text
-                            {
-                                width: parent.width
-                                text: modelData ? modelData.url : ""
-                                color: ColorTheme.transparent(ColorTheme.colors.light4, 0.6)
-                                font.pixelSize: FontConfig.small.pixelSize
-                                elide: Text.ElideMiddle
-                            }
+                            // Only the sanitized name is shown, so credentials from the URL are
+                            // never displayed.
+                            text: modelData ? modelData.name : ""
+                            color: ColorTheme.colors.light4
+                            font.pixelSize: FontConfig.normal.pixelSize
+                            elide: Text.ElideMiddle
                         }
 
                         Button
@@ -145,6 +134,17 @@ Dialog
             width: parent.width
             placeholderText: qsTr("rtsp://user:password@host:554/stream")
             onAccepted: control.addSource()
+        }
+
+        Text
+        {
+            width: parent.width
+
+            text: qsTr("If the camera requires authentication, embed the credentials into the URL,"
+                + " e.g. rtsp://user:password@host/stream.")
+            color: ColorTheme.transparent(ColorTheme.colors.light4, 0.6)
+            font.pixelSize: FontConfig.small.pixelSize
+            wrapMode: Text.WordWrap
         }
 
         Button

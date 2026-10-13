@@ -17,6 +17,8 @@ extern "C" {
 #include <nx/media/video_data_packet.h>
 #include <nx/utils/log/log.h>
 
+#include "local_camera_source.h"
+
 namespace nx::vms::client::desktop {
 
 struct LocalCameraArchiveDelegate::Private
@@ -53,7 +55,7 @@ QString LocalCameraArchiveDelegate::lastErrorMessage() const
 
 QString LocalCameraArchiveDelegate::sourceDescription() const
 {
-    return d->url.isEmpty() ? d->deviceId : d->url;
+    return d->url.isEmpty() ? d->deviceId : localCameraSourceUrlForDisplay(d->url);
 }
 
 int LocalCameraArchiveDelegate::interruptCallback(void* opaque)
@@ -197,7 +199,8 @@ bool LocalCameraArchiveDelegate::openUrl()
         d->formatContext = nullptr;
     }
 
-    d->lastError = tr("Failed to open stream '%1': %2.").arg(d->url, lastError);
+    d->lastError = tr("Failed to open stream '%1': %2.")
+        .arg(localCameraSourceUrlForDisplay(d->url), lastError);
     return false;
 }
 
@@ -224,7 +227,12 @@ bool LocalCameraArchiveDelegate::open(
         return true;
 
     m_needStop = false;
-    return openStream();
+    if (openStream())
+        return true;
+
+    NX_WARNING(typeid(LocalCameraArchiveDelegate), "Failed to open local source '%1': %2",
+        sourceDescription(), d->lastError);
+    return false;
 }
 
 void LocalCameraArchiveDelegate::close()

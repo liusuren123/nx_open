@@ -27,8 +27,11 @@ LocalCameraResource::LocalCameraResource(const LocalCameraSource& source):
 {
     addFlags(Qn::local_live_cam);
 
-    setName(source.name.isEmpty() ? source.url : source.name);
-    setUrl(source.url);
+    // The resource name and URL are used for display and for layout descriptors, so they must never
+    // contain the credentials from the stream URL. The full URL is kept in m_url and is only passed
+    // to FFmpeg.
+    setName(source.displayName());
+    setUrl(source.displayName());
     setIdUnsafe(source.id);
 }
 
