@@ -21,6 +21,7 @@
 #include <nx/vms/client/desktop/export/settings/export_media_persistent_settings.h>
 #include <nx/vms/client/desktop/jsapi/auth_allowed_urls.h>
 #include <nx/vms/client/desktop/playlists/playlist.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_source.h>
 #include <nx/vms/client/desktop/webpage/web_page_settings.h>
 #include <nx/vms/common/system_health/message_type.h>
 #include <ui/workbench/handlers/workbench_screenshot_handler.h>
@@ -154,6 +155,9 @@ public:
     Property<QList<Playlist>> playlists{this, "playlists", {},
         "Local media playlists."};
     Property<nx::Uuid> currentPlaylistId{this, "currentPlaylistId"};
+
+    Property<QList<LocalCameraSource>> localCameraSources{this, "localCameraSources", {},
+        "Client-side video sources configured by the user, e.g. RTSP cameras."};
 
     Property<bool> allowMtDecoding{this, "allowMtDecoding", true,
         "Disable MT decoding if false, enable auto selection if true."};

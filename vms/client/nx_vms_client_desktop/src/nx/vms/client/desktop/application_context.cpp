@@ -67,6 +67,7 @@
 #include <nx/vms/client/desktop/radass/radass_controller.h>
 #include <nx/vms/client/desktop/resource/resource_factory.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_manager.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
 #include <nx/vms/client/desktop/resource/screen_recording/audio_video_win/audio_video_input.h>
 #include <nx/vms/client/desktop/settings/ipc_settings_synchronizer.h>
@@ -374,6 +375,7 @@ struct ApplicationContext::Private
     std::unique_ptr<QnForgottenSystemsManager> forgottenSystemsManager;
     std::unique_ptr<ResourcesChangesManager> resourcesChangesManager;
     std::unique_ptr<PlaylistManager> playlistManager;
+    std::unique_ptr<LocalCameraManager> localCameraManager;
     std::unique_ptr<WebPageDataCache> webPageDataCache;
     std::unique_ptr<QnQtbugWorkaround> qtBugWorkarounds;
     std::unique_ptr<core::DesktopResourceSearcher> desktopResourceSearcher;
@@ -801,6 +803,7 @@ ApplicationContext::ApplicationContext(
             d->forgottenSystemsManager = std::make_unique<QnForgottenSystemsManager>();
             d->resourcesChangesManager = std::make_unique<ResourcesChangesManager>();
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
+            d->localCameraManager = std::make_unique<LocalCameraManager>(d->localSettings.get());
             d->webPageDataCache = std::make_unique<WebPageDataCache>();
             d->qtBugWorkarounds = std::make_unique<QnQtbugWorkaround>();
             if (!startupParameters.localMode)
@@ -838,6 +841,7 @@ ApplicationContext::~ApplicationContext()
     // For now it depends on a System Context, later it will be moved to the Local System Context.
     d->desktopResourceSearcher.reset();
     d->localCameraResourceSearcher.reset();
+    d->localCameraManager.reset();
 
     // Local resources context temporary implementation depends on main system context.
     d->localResourcesContext.reset();
@@ -1040,6 +1044,11 @@ ResourcesChangesManager* ApplicationContext::resourcesChangesManager() const
 PlaylistManager* ApplicationContext::playlistManager() const
 {
     return d->playlistManager.get();
+}
+
+LocalCameraManager* ApplicationContext::localCameraManager() const
+{
+    return d->localCameraManager.get();
 }
 
 WebPageDataCache* ApplicationContext::webPageDataCache() const

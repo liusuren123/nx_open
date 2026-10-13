@@ -9,6 +9,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
+#include <libavutil/error.h>
 }
 
 #include <core/resource/resource_media_layout.h>
@@ -20,7 +21,11 @@ namespace nx::vms::client::desktop {
 
 struct LocalCameraArchiveDelegate::Private
 {
-    const QString deviceName;
+    /** Capture device name; empty for URL sources. */
+    const QString deviceId;
+
+    /** Stream URL; empty for capture devices. */
+    const QString url;
 
     AVFormatContext* formatContext = nullptr;
     AVPacket* packet = nullptr;
@@ -30,8 +35,8 @@ struct LocalCameraArchiveDelegate::Private
     QString lastError;
 };
 
-LocalCameraArchiveDelegate::LocalCameraArchiveDelegate(const QString& deviceName):
-    d(new Private{deviceName})
+LocalCameraArchiveDelegate::LocalCameraArchiveDelegate(const QString& deviceId, const QString& url):
+    d(new Private{deviceId, url})
 {
     setObjectName("LocalCameraArchiveDelegate");
 }
@@ -46,16 +51,77 @@ QString LocalCameraArchiveDelegate::lastErrorMessage() const
     return d->lastError;
 }
 
+QString LocalCameraArchiveDelegate::sourceDescription() const
+{
+    return d->url.isEmpty() ? d->deviceId : d->url;
+}
+
 int LocalCameraArchiveDelegate::interruptCallback(void* opaque)
 {
     const auto delegate = static_cast<LocalCameraArchiveDelegate*>(opaque);
     return delegate->m_needStop ? 1 : 0;
 }
 
-bool LocalCameraArchiveDelegate::openDevice()
+bool LocalCameraArchiveDelegate::openStream()
 {
     avdevice_register_all();
 
+    if (!d->url.isEmpty())
+    {
+        if (!openUrl())
+            return false;
+    }
+    else if (!openCaptureDevice())
+    {
+        return false;
+    }
+
+    // Let av_read_frame() bail out once playback is stopped.
+    d->formatContext->interrupt_callback.callback =
+        &LocalCameraArchiveDelegate::interruptCallback;
+    d->formatContext->interrupt_callback.opaque = this;
+
+    if (avformat_find_stream_info(d->formatContext, nullptr) < 0)
+    {
+        d->lastError = tr("Failed to read stream information from '%1'.")
+            .arg(sourceDescription());
+        return false;
+    }
+
+    d->videoStreamIndex = av_find_best_stream(
+        d->formatContext, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (d->videoStreamIndex < 0)
+    {
+        d->lastError = tr("Source '%1' has no video stream.").arg(sourceDescription());
+        return false;
+    }
+
+    const AVStream* stream = d->formatContext->streams[d->videoStreamIndex];
+    const AVCodecID codecId = stream->codecpar->codec_id;
+
+    // Raw pixel formats would have to be converted and re-encoded, which is not supported yet.
+    const bool isRaw = codecId == AV_CODEC_ID_NONE || codecId == AV_CODEC_ID_RAWVIDEO;
+    if (isRaw || !avcodec_find_decoder(codecId))
+    {
+        d->lastError = tr("Unsupported video format of source '%1' (codec id %2).")
+            .arg(sourceDescription()).arg(static_cast<int>(codecId));
+        return false;
+    }
+
+    d->codecParameters = CodecParametersConstPtr(new CodecParameters(stream->codecpar));
+    d->packet = av_packet_alloc();
+
+    NX_INFO(typeid(LocalCameraArchiveDelegate), "Opened local source '%1': %2x%3, %4 fps",
+        sourceDescription(),
+        stream->codecpar->width,
+        stream->codecpar->height,
+        av_q2d(stream->avg_frame_rate));
+
+    return true;
+}
+
+bool LocalCameraArchiveDelegate::openCaptureDevice()
+{
     const AVInputFormat* inputFormat = av_find_input_format("dshow");
     if (!inputFormat)
     {
@@ -63,7 +129,7 @@ bool LocalCameraArchiveDelegate::openDevice()
         return false;
     }
 
-    const QByteArray deviceName = ("video=" + d->deviceName).toUtf8();
+    const QByteArray deviceName = ("video=" + d->deviceId).toUtf8();
 
     // Prefer the camera's compressed output: MJPEG / H.264 frames are forwarded without
     // re-encoding. A few devices accept neither and only expose raw formats, so a plain open is
@@ -80,59 +146,62 @@ bool LocalCameraArchiveDelegate::openDevice()
         av_dict_free(&options);
 
         if (result >= 0)
-            break;
+            return true;
 
         d->formatContext = nullptr;
     }
 
-    if (!d->formatContext)
-    {
-        d->lastError = tr("Failed to open capture device '%1'.").arg(d->deviceName);
-        return false;
-    }
-
-    // Let av_read_frame() bail out once playback is stopped.
-    d->formatContext->interrupt_callback.callback =
-        &LocalCameraArchiveDelegate::interruptCallback;
-    d->formatContext->interrupt_callback.opaque = this;
-
-    if (avformat_find_stream_info(d->formatContext, nullptr) < 0)
-    {
-        d->lastError = tr("Failed to read stream information from '%1'.").arg(d->deviceName);
-        return false;
-    }
-
-    d->videoStreamIndex = av_find_best_stream(
-        d->formatContext, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    if (d->videoStreamIndex < 0)
-    {
-        d->lastError = tr("Capture device '%1' has no video stream.").arg(d->deviceName);
-        return false;
-    }
-
-    const AVStream* stream = d->formatContext->streams[d->videoStreamIndex];
-    const AVCodecID codecId = stream->codecpar->codec_id;
-    if (codecId != AV_CODEC_ID_MJPEG && codecId != AV_CODEC_ID_H264)
-    {
-        // Raw pixel formats would have to be converted and re-encoded; not supported yet.
-        d->lastError = tr("Unsupported pixel format of capture device '%1' (codec id %2).")
-            .arg(d->deviceName).arg(static_cast<int>(codecId));
-        return false;
-    }
-
-    d->codecParameters = CodecParametersConstPtr(new CodecParameters(stream->codecpar));
-    d->packet = av_packet_alloc();
-
-    NX_INFO(typeid(LocalCameraArchiveDelegate), "Opened local camera '%1': %2x%3, %4 fps",
-        d->deviceName,
-        stream->codecpar->width,
-        stream->codecpar->height,
-        av_q2d(stream->avg_frame_rate));
-
-    return true;
+    d->lastError = tr("Failed to open capture device '%1'.").arg(d->deviceId);
+    return false;
 }
 
-void LocalCameraArchiveDelegate::closeDevice()
+bool LocalCameraArchiveDelegate::openUrl()
+{
+    // Interleaved RTSP over TCP tolerates packet loss and works through NAT much better than plain
+    // UDP, so it is tried first. A few servers (e.g. VLC's VOD mode) only support UDP, hence the
+    // fallback.
+    static const QStringList transports{"tcp", "udp"};
+
+    QString lastError;
+    for (const QString& transport: transports)
+    {
+        d->formatContext = avformat_alloc_context();
+        if (!d->formatContext)
+        {
+            d->lastError = tr("Failed to allocate an FFmpeg context.");
+            return false;
+        }
+
+        d->formatContext->interrupt_callback.callback =
+            &LocalCameraArchiveDelegate::interruptCallback;
+        d->formatContext->interrupt_callback.opaque = this;
+
+        AVDictionary* options = nullptr;
+        av_dict_set(&options, "rtsp_transport", transport.toUtf8().constData(), 0);
+        av_dict_set(&options, "stimeout", "5000000", 0); //< Socket timeout, in microseconds.
+        av_dict_set(&options, "max_delay", "500000", 0);
+        av_dict_set(&options, "fflags", "nobuffer", 0);
+        av_dict_set(&options, "flags", "low_delay", 0);
+
+        const int result = avformat_open_input(
+            &d->formatContext, d->url.toUtf8().constData(), /*inputFormat*/ nullptr, &options);
+        av_dict_free(&options);
+
+        if (result >= 0 && d->formatContext)
+            return true;
+
+        char buffer[AV_ERROR_MAX_STRING_SIZE]{};
+        av_strerror(result, buffer, sizeof(buffer));
+        lastError = QString::fromUtf8(buffer);
+
+        d->formatContext = nullptr;
+    }
+
+    d->lastError = tr("Failed to open stream '%1': %2.").arg(d->url, lastError);
+    return false;
+}
+
+void LocalCameraArchiveDelegate::closeStream()
 {
     if (d->packet)
         av_packet_free(&d->packet);
@@ -155,13 +224,13 @@ bool LocalCameraArchiveDelegate::open(
         return true;
 
     m_needStop = false;
-    return openDevice();
+    return openStream();
 }
 
 void LocalCameraArchiveDelegate::close()
 {
     m_needStop = true;
-    closeDevice();
+    closeStream();
 }
 
 void LocalCameraArchiveDelegate::pleaseStop()
@@ -188,7 +257,7 @@ qint64 LocalCameraArchiveDelegate::seek(qint64 /*time*/, bool /*findIFrame*/)
 
 QnConstResourceVideoLayoutPtr LocalCameraArchiveDelegate::getVideoLayout()
 {
-    // A capture device always provides a single video channel.
+    // A capture device or a stream URL always provides a single video channel.
     static const QnConstResourceVideoLayoutPtr layout =
         std::make_shared<QnDefaultResourceVideoLayout>();
     return layout;
@@ -219,7 +288,7 @@ QnAbstractMediaDataPtr LocalCameraArchiveDelegate::takeVideoPacket()
 
             if (!m_needStop)
                 NX_WARNING(typeid(LocalCameraArchiveDelegate),
-                    "Local camera '%1' read error: %2", d->deviceName, result);
+                    "Local source '%1' read error: %2", sourceDescription(), result);
 
             return {};
         }

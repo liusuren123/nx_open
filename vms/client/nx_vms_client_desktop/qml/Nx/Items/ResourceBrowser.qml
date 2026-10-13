@@ -93,13 +93,35 @@ Item
                     }
                 }
 
+                // In the local player mode there is no server, so client-side video sources
+                // (RTSP cameras and the like) are configured from here.
+                Item
+                {
+                    id: localSourcesPane
+
+                    width: parent.width
+                    height: visible ? 36 : 0
+                    y: resourceSearchPane.y + resourceSearchPane.height
+                    visible: resourceTree.localFilesMode
+
+                    Button
+                    {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        text: qsTr("Local sources…")
+                        onClicked: localSourcesDialog.show()
+                    }
+                }
+
                 Rectangle
                 {
                     id: separator
 
                     width: parent.width
                     height: 1
-                    y: resourceSearchPane.y + resourceSearchPane.height
+                    y: localSourcesPane.y + localSourcesPane.height
                     color: ColorTheme.transparent(ColorTheme.colors.dark8, 0.4)
                 }
 
@@ -194,5 +216,12 @@ Item
                 id: playlistBrowser
             }
         }
+    }
+
+    LocalSourcesDialog
+    {
+        id: localSourcesDialog
+
+        transientParent: resourcesPanel.Window.window
     }
 }

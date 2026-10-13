@@ -32,6 +32,7 @@ class ResourceFactory;
 class ResourceDirectoryBrowser;
 class ResourcesChangesManager;
 class PlaylistManager;
+class LocalCameraManager;
 class RunningInstancesManager;
 class ScreenRecordingSettings;
 class SharedMemoryManager;
@@ -217,6 +218,8 @@ public:
     ResourcesChangesManager* resourcesChangesManager() const;
 
     PlaylistManager* playlistManager() const;
+
+    LocalCameraManager* localCameraManager() const;
 
     QnForgottenSystemsManager* forgottenSystemsManager() const;
 

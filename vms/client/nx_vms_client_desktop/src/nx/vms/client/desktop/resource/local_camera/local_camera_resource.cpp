@@ -17,8 +17,19 @@ LocalCameraResource::LocalCameraResource(const QString& deviceId, const QString&
     addFlags(Qn::local_live_cam);
 
     setName(name.isEmpty() ? tr("Local camera") : name);
-    setUrl(m_deviceId);
+    setUrl(deviceId);
     setIdUnsafe(resourceIdForDevice(deviceId));
+}
+
+LocalCameraResource::LocalCameraResource(const LocalCameraSource& source):
+    m_url(source.url),
+    m_sourceId(source.id)
+{
+    addFlags(Qn::local_live_cam);
+
+    setName(source.name.isEmpty() ? source.url : source.name);
+    setUrl(source.url);
+    setIdUnsafe(source.id);
 }
 
 nx::Uuid LocalCameraResource::resourceIdForDevice(const QString& deviceId)
@@ -37,14 +48,14 @@ QnAbstractStreamDataProvider* LocalCameraResource::createDataProvider(Qn::Connec
     // how both local files and live cameras are provided. The captured frames are fed through a
     // delegate, so the reader (and the camera display behind it) get everything they need.
     auto reader = new QnArchiveStreamReader(toSharedPointer(this));
-    reader->setArchiveDelegate(
-        std::unique_ptr<QnAbstractArchiveDelegate>(new LocalCameraArchiveDelegate(getName())));
+    reader->setArchiveDelegate(std::unique_ptr<QnAbstractArchiveDelegate>(
+        new LocalCameraArchiveDelegate(m_deviceId, m_url)));
     return reader;
 }
 
 QnConstResourceVideoLayoutPtr LocalCameraResource::getVideoLayout(const QnAbstractStreamDataProvider*)
 {
-    // A capture device always provides a single video channel.
+    // A capture device or a stream URL always provides a single video channel.
     static const QnConstResourceVideoLayoutPtr layout =
         std::make_shared<QnDefaultResourceVideoLayout>();
     return layout;

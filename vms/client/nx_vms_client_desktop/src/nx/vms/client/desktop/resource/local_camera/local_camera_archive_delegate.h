@@ -12,15 +12,16 @@
 namespace nx::vms::client::desktop {
 
 /**
- * Feeds a local capture device (USB / built-in camera) to a QnArchiveStreamReader.
+ * Feeds a client-side live source to a QnArchiveStreamReader: either a local capture device
+ * (USB / built-in camera) or a user-provided stream URL (e.g. an RTSP camera).
  *
  * The client's media pipeline expects every resource data provider to be an archive stream reader
  * backed by an archive delegate (that is how both local files and live cameras work), so a local
- * camera has to be provided through this interface rather than as a plain stream provider.
+ * source has to be provided through this interface rather than as a plain stream provider.
  *
- * The device is opened through FFmpeg's avdevice layer (the `dshow` input on Windows). Compressed
- * frames (MJPEG or H.264, which is what web cameras normally output) are forwarded as is, marked
- * with MediaFlags_LIVE and timestamped with the wall clock.
+ * Capture devices are opened through FFmpeg's avdevice layer (the `dshow` input on Windows), stream
+ * URLs through the regular avformat layer. Compressed frames (MJPEG, H.264, H.265...) are forwarded
+ * as is, marked with MediaFlags_LIVE and timestamped with the wall clock.
  */
 class LocalCameraArchiveDelegate: public QnAbstractArchiveDelegate
 {
@@ -28,7 +29,13 @@ class LocalCameraArchiveDelegate: public QnAbstractArchiveDelegate
     using base_type = QnAbstractArchiveDelegate;
 
 public:
-    explicit LocalCameraArchiveDelegate(const QString& deviceName);
+    /**
+     * Exactly one of the two arguments must be set.
+     *
+     * @param deviceId Capture device name as expected by FFmpeg's `dshow` input.
+     * @param url Stream URL the client opens directly (rtsp, http, udp...).
+     */
+    LocalCameraArchiveDelegate(const QString& deviceId, const QString& url);
     virtual ~LocalCameraArchiveDelegate() override;
 
     virtual bool open(const QnResourcePtr& resource,
@@ -54,9 +61,12 @@ public:
 
 private:
     static int interruptCallback(void* opaque);
-    bool openDevice();
-    void closeDevice();
+    bool openStream();
+    bool openCaptureDevice();
+    bool openUrl();
+    void closeStream();
     QnAbstractMediaDataPtr takeVideoPacket();
+    QString sourceDescription() const;
 
     struct Private;
     nx::utils::ImplPtr<Private> d;
