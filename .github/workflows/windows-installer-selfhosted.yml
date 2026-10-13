@@ -83,20 +83,25 @@ jobs:
 
       - name: Update local tree (optional)
         run: |
+          rem Let git operate on a tree owned by another account (e.g. a runner service account).
+          git config --global --add safe.directory "%NX_SOURCE_DIR%" >nul 2>&1
           if "%NX_GIT_REF%" == "" (
             echo No git_ref provided - building the tree as-is.
-            git -C "%NX_SOURCE_DIR%" rev-parse --short HEAD
             goto :done
           )
           echo Fetching and checking out "%NX_GIT_REF%"...
           git -C "%NX_SOURCE_DIR%" fetch --all --tags --prune
           git -C "%NX_SOURCE_DIR%" checkout "%NX_GIT_REF%"
           :done
+          echo Current checkout:
+          git -C "%NX_SOURCE_DIR%" rev-parse --short HEAD 2>nul || echo (HEAD unavailable for this account)
 
       - name: Configure build tree (only if not configured yet)
         run: |
           set "PATH=%NX_PYTHON_SCRIPTS_DIR%;%PATH%"
           if exist "%NX_BUILD_DIR%\CMakeCache.txt" goto :skip
+          call "%NX_SOURCE_DIR%\build_utils\msvc\call_vcvars64.bat"
+          if errorlevel 1 exit /b 1
           echo Configuring a fresh build tree...
           cmake -S "%NX_SOURCE_DIR%" -B "%NX_BUILD_DIR%" -G Ninja ^
             -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe ^
