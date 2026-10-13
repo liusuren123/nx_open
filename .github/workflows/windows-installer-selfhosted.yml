@@ -1,0 +1,143 @@
+# Builds the Windows installer on a SELF-HOSTED runner running on the machine
+# that already has the source tree, the configured Release build directory and
+# the Conan cache. That makes every run incremental (only what changed gets
+# recompiled) instead of a multi-hour clean build.
+#
+# Requirements on the runner machine:
+#   - A GitHub Actions self-hosted runner with the labels: self-hosted, windows, x64
+#   - NX_SOURCE_DIR  - an existing clone of this repository (default below)
+#   - NX_BUILD_DIR   - the Release CMake build dir next to it (created on first run)
+#   - Visual Studio 2022 + the MSVC toolset named in NX_FORCED_VC_TOOLSET_VERSION
+#   - (optional) CUDA, if NX_CUDA_TOOLKIT_DIR is set and the decoder is enabled
+#
+# NOTE: this job mutates the given source tree (git fetch/checkout) only when a
+# git_ref input is provided; otherwise it builds whatever is checked out there.
+
+name: Windows Installer (self-hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Optional git ref to check out in the local tree before building (empty = build as-is)"
+        type: string
+        default: ""
+      nvidia_decoder:
+        description: "Nvidia hardware decoder"
+        type: choice
+        options:
+          - "ON"
+          - "OFF"
+        default: "ON"
+
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+# Serialize runs: they all share one build directory on the same machine.
+concurrency:
+  group: windows-installer-selfhosted
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    name: Build Windows installer (self-hosted)
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 360
+
+    defaults:
+      run:
+        shell: cmd
+
+    env:
+      # Adjust these if the runner machine uses different paths/toolchain.
+      NX_SOURCE_DIR: E:\GitRepo\nx_open
+      NX_BUILD_DIR: E:\GitRepo\nx_open-build-rel
+      NX_FORCED_VC_TOOLSET_VERSION: "14.44.35207"
+      NX_CUDA_TOOLKIT_DIR: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8
+      # Must be the scripts dir of the Python env whose pip-installed cmake/ninja/conan
+      # configured the build tree. Using a different cmake invalidates the whole tree
+      # (CMake regenerates build.ninja and everything gets recompiled).
+      NX_PYTHON_SCRIPTS_DIR: C:\Users\liusu\AppData\Roaming\Python\Python313\Scripts
+
+      # Filled from the workflow input; empty on tag pushes.
+      NX_GIT_REF: ${{ inputs.git_ref }}
+      NX_NVIDIA_DECODER: ${{ inputs.nvidia_decoder || 'ON' }}
+
+    steps:
+      - name: Check paths
+        run: |
+          if not exist "%NX_SOURCE_DIR%\CMakeLists.txt" (
+            echo ERROR: NX_SOURCE_DIR does not look like the repository: "%NX_SOURCE_DIR%"
+            exit /b 1
+          )
+          if not exist "%NX_SOURCE_DIR%\build_utils\msvc\call_vcvars64.bat" (
+            echo ERROR: call_vcvars64.bat not found under "%NX_SOURCE_DIR%"
+            exit /b 1
+          )
+          echo Source: "%NX_SOURCE_DIR%"
+          echo Build : "%NX_BUILD_DIR%"
+
+      - name: Update local tree (optional)
+        run: |
+          if "%NX_GIT_REF%" == "" (
+            echo No git_ref provided - building the tree as-is.
+            git -C "%NX_SOURCE_DIR%" rev-parse --short HEAD
+            goto :done
+          )
+          echo Fetching and checking out "%NX_GIT_REF%"...
+          git -C "%NX_SOURCE_DIR%" fetch --all --tags --prune
+          git -C "%NX_SOURCE_DIR%" checkout "%NX_GIT_REF%"
+          :done
+
+      - name: Configure build tree (only if not configured yet)
+        run: |
+          set "PATH=%NX_PYTHON_SCRIPTS_DIR%;%PATH%"
+          if exist "%NX_BUILD_DIR%\CMakeCache.txt" goto :skip
+          echo Configuring a fresh build tree...
+          cmake -S "%NX_SOURCE_DIR%" -B "%NX_BUILD_DIR%" -G Ninja ^
+            -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe ^
+            -DdeveloperBuild=OFF ^
+            -DwithNvidiaDecoder=%NX_NVIDIA_DECODER%
+          if errorlevel 1 exit /b 1
+          :skip
+
+      - name: Build MSI and installer
+        run: |
+          rem Put the same cmake/ninja/conan (pip-installed) that configured the tree first on PATH.
+          set "PATH=%NX_PYTHON_SCRIPTS_DIR%;%PATH%"
+          call "%NX_SOURCE_DIR%\build_utils\msvc\call_vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          if not "%VCToolsInstallDir%" == "" set NX_MSVC_CL_EXE=%VCToolsInstallDir%bin\Hostx64\x64\cl.exe
+          echo Using toolchain:
+          where cmake
+          cmake --version
+          cmake --build "%NX_BUILD_DIR%" --target distribution_wix_client_msi distribution_wix_client
+          if errorlevel 1 exit /b 1
+
+      - name: Collect artifacts
+        run: |
+          set "DEST=%RUNNER_TEMP%\nx-installer"
+          if exist "%DEST%" rmdir /S /Q "%DEST%"
+          mkdir "%DEST%"
+          copy /Y "%NX_BUILD_DIR%\distrib\*.exe" "%DEST%\"
+          copy /Y "%NX_BUILD_DIR%\vms\distribution\wix\desktop_client\client-*.msi" "%DEST%\"
+          dir "%DEST%"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-meta-windows-installer-selfhosted
+          path: ${{ runner.temp }}\nx-installer\*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach installer to the Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}\nx-installer\*
+          generate_release_notes: true

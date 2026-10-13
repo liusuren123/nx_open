@@ -1,0 +1,116 @@
+# Builds the Windows installer (WiX MSI + client distribution bundle) of the
+# open-source VMS Desktop Client on a GitHub-hosted runner.
+#
+# The heavy build steps mirror what build.bat does locally, but use only
+# portable options (no machine-specific MSVC toolset pin, no system CUDA) so
+# they work on a clean runner. The Conan download cache is persisted between
+# runs to avoid re-downloading the prebuilt dependencies every time.
+
+name: Windows Installer
+
+on:
+  # Run manually from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      nvidia_decoder:
+        description: "Nvidia hardware decoder (ON needs a CUDA toolkit on the runner)"
+        type: choice
+        options:
+          - "OFF"
+          - "ON"
+        default: "OFF"
+
+  # Also build when a version tag is pushed.
+  push:
+    tags:
+      - "v*"
+
+# Needed to attach the artifacts to a GitHub Release when a tag is pushed.
+permissions:
+  contents: write
+
+# Never run two packaging jobs for the same ref at the same time.
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    name: Build Windows installer
+    runs-on: windows-2022
+    # A full Release build of the client is heavy; give it plenty of room.
+    timeout-minutes: 360
+
+    defaults:
+      run:
+        shell: cmd
+
+    env:
+      # Conan stores downloaded packages here; cached between runs (see below).
+      NX_CONAN_DOWNLOAD_CACHE: ${{ github.workspace }}\conan_cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The build number is derived from git tags, so the full history and
+          # all tags are required.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install CMake, Ninja and Conan
+        run: |
+          python -m pip install --upgrade pip
+          pip install "conan==1.66.0" "cmake==3.30.4" "ninja==1.10.2"
+          if not exist conan_cache mkdir conan_cache
+
+      - name: Restore Conan download cache
+        uses: actions/cache@v4
+        with:
+          path: conan_cache
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'conan_profiles/**', 'requirements.txt') }}
+          restore-keys: |
+            conan-${{ runner.os }}-
+
+      - name: CMake generation (fetch dependencies)
+        run: >
+          cmake -S . -B nx_open-build -G Ninja
+          -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe
+          -DdeveloperBuild=OFF
+          -DwithNvidiaDecoder=${{ inputs.nvidia_decoder || 'OFF' }}
+
+      - name: Build MSI and installer
+        run: >
+          cmake --build nx_open-build --target
+          distribution_wix_client_msi distribution_wix_client
+
+      - name: Collect artifacts
+        run: |
+          if not exist dist-artifacts mkdir dist-artifacts
+          copy /Y nx_open-build\distrib\*.exe dist-artifacts\
+          copy /Y nx_open-build\vms\distribution\wix\desktop_client\client-*.msi dist-artifacts\
+          dir dist-artifacts
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-meta-windows-installer
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach installer to the Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-artifacts/*
+          generate_release_notes: true
