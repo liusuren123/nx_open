@@ -3,8 +3,9 @@
 #include "local_camera_resource.h"
 
 #include <core/resource/resource_media_layout.h>
+#include <nx/streaming/archive_stream_reader.h>
 
-#include "local_camera_data_provider.h"
+#include "local_camera_archive_delegate.h"
 
 namespace nx::vms::client::desktop {
 
@@ -32,8 +33,13 @@ bool LocalCameraResource::hasVideo(const QnAbstractStreamDataProvider*) const
 
 QnAbstractStreamDataProvider* LocalCameraResource::createDataProvider(Qn::ConnectionRole)
 {
-    // According to the legacy design, the caller retains ownership of the created object.
-    return new LocalCameraDataProvider(toSharedPointer(this), getName());
+    // The media pipeline expects an archive stream reader backed by an archive delegate, which is
+    // how both local files and live cameras are provided. The captured frames are fed through a
+    // delegate, so the reader (and the camera display behind it) get everything they need.
+    auto reader = new QnArchiveStreamReader(toSharedPointer(this));
+    reader->setArchiveDelegate(
+        std::unique_ptr<QnAbstractArchiveDelegate>(new LocalCameraArchiveDelegate(getName())));
+    return reader;
 }
 
 QnConstResourceVideoLayoutPtr LocalCameraResource::getVideoLayout(const QnAbstractStreamDataProvider*)
