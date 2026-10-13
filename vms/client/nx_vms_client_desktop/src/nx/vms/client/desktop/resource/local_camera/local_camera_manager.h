@@ -31,9 +31,11 @@ public:
 
     /**
      * Adds a source. An empty URL is rejected, and a URL that is already configured is ignored.
-     * Returns whether the source list was changed.
+     * The credentials are optional; when given, they are stored separately and embedded into the
+     * URL only when the stream is opened. Returns whether the source list was changed.
      */
-    Q_INVOKABLE bool addSource(const QString& name, const QString& url);
+    Q_INVOKABLE bool addSource(const QString& name, const QString& url,
+        const QString& username, const QString& password);
 
     /** Removes the source with the given id. Returns whether it was found. */
     Q_INVOKABLE bool removeSource(const QString& id);

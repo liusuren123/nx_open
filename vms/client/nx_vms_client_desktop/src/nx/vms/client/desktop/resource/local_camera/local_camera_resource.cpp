@@ -22,7 +22,7 @@ LocalCameraResource::LocalCameraResource(const QString& deviceId, const QString&
 }
 
 LocalCameraResource::LocalCameraResource(const LocalCameraSource& source):
-    m_url(source.url),
+    m_url(source.streamUrl()),
     m_sourceId(source.id)
 {
     addFlags(Qn::local_live_cam);

@@ -56,7 +56,8 @@ QVariantList LocalCameraManager::sources() const
     return result;
 }
 
-bool LocalCameraManager::addSource(const QString& name, const QString& url)
+bool LocalCameraManager::addSource(const QString& name, const QString& url,
+    const QString& username, const QString& password)
 {
     if (!m_settings)
         return false;
@@ -76,6 +77,8 @@ bool LocalCameraManager::addSource(const QString& name, const QString& url)
     source.id = nx::Uuid::createUuid();
     source.name = name.trimmed(); //< May be empty: the name is then derived from the URL.
     source.url = trimmedUrl;
+    source.username = username.trimmed();
+    source.password = password;
     list.append(source);
 
     m_settings->localCameraSources = list; //< Emits changed => syncPool().

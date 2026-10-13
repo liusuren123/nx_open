@@ -26,6 +26,42 @@ QString localCameraSourceUrlForDisplay(const QString& url)
     return url.left(authorityStart) + url.mid(credentialsEnd + 1);
 }
 
+QString LocalCameraSource::streamUrl() const
+{
+    const QString trimmedUsername = username.trimmed();
+    const QString trimmedPassword = password.trimmed();
+
+    // No explicit credentials: use the URL exactly as typed (it may already embed them).
+    if (trimmedUsername.isEmpty() && trimmedPassword.isEmpty())
+        return url;
+
+    if (url.isEmpty())
+        return url;
+
+    // The credentials are inserted the very same way the user would have typed them into the URL,
+    // e.g. "rtsp://user:password@host/stream", and are deliberately NOT percent-encoded: FFmpeg
+    // treats URLs verbatim and splits the userinfo at the last '@', which is exactly how a
+    // hand-written URL behaves.
+    QString userinfo = trimmedUsername;
+    if (!trimmedPassword.isEmpty())
+        userinfo += ':' + trimmedPassword;
+
+    const QString schemeSeparator = "://";
+    const int schemeEnd = url.indexOf(schemeSeparator);
+    const int authorityStart = schemeEnd < 0 ? 0 : schemeEnd + schemeSeparator.size();
+
+    // The authority runs up to the first '/' after it (or to the end of the URL).
+    const int authorityEnd = url.indexOf('/', authorityStart);
+    const int authorityLimit = authorityEnd < 0 ? url.size() : authorityEnd;
+
+    // If the URL already carries credentials, drop them so they are not duplicated.
+    const int existingAt = url.lastIndexOf('@', authorityLimit - 1);
+    const int hostStart = existingAt >= authorityStart ? existingAt + 1 : authorityStart;
+    const QString host = url.mid(hostStart, authorityLimit - hostStart);
+
+    return url.left(authorityStart) + userinfo + '@' + host + url.mid(authorityLimit);
+}
+
 QString LocalCameraSource::displayName() const
 {
     return name.isEmpty() ? localCameraSourceUrlForDisplay(url) : name;

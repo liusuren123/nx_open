@@ -21,9 +21,9 @@ Dialog
     title: qsTr("Local Video Sources")
 
     width: 520
-    height: 480
+    height: 600
     minimumWidth: 520
-    minimumHeight: 480
+    minimumHeight: 600
 
     modality: Qt.ApplicationModal
 
@@ -32,11 +32,16 @@ Dialog
 
     function addSource()
     {
-        if (!LocalCameraManager.addSource(nameField.text, urlField.text))
+        if (!LocalCameraManager.addSource(nameField.text, urlField.text,
+            usernameField.text, passwordField.text))
+        {
             return
+        }
 
         nameField.text = ""
         urlField.text = ""
+        usernameField.text = ""
+        passwordField.text = ""
     }
 
     contentItem: Column
@@ -132,16 +137,40 @@ Dialog
             id: urlField
 
             width: parent.width
-            placeholderText: qsTr("rtsp://user:password@host:554/stream")
+            placeholderText: qsTr("rtsp://host:554/stream")
             onAccepted: control.addSource()
+        }
+
+        Row
+        {
+            width: parent.width
+            spacing: 10
+
+            TextField
+            {
+                id: usernameField
+
+                width: (parent.width - parent.spacing) / 2
+                placeholderText: qsTr("Username (optional)")
+            }
+
+            TextField
+            {
+                id: passwordField
+
+                width: (parent.width - parent.spacing) / 2
+                placeholderText: qsTr("Password (optional)")
+                echoMode: TextInput.Password
+                onAccepted: control.addSource()
+            }
         }
 
         Text
         {
             width: parent.width
 
-            text: qsTr("If the camera requires authentication, embed the credentials into the URL,"
-                + " e.g. rtsp://user:password@host/stream.")
+            text: qsTr("If the camera requires authentication, fill in the username and password"
+                + " above (or embed them into the URL). They are stored locally and never shown.")
             color: ColorTheme.transparent(ColorTheme.colors.light4, 0.6)
             font.pixelSize: FontConfig.small.pixelSize
             wrapMode: Text.WordWrap
