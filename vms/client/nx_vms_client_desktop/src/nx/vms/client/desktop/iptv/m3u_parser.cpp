@@ -4,6 +4,7 @@
 
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
+#include <QtCore/QUrl>
 
 #include <nx/utils/log/log.h>
 
@@ -33,9 +34,26 @@ int titleSeparator(const QString& info)
     return -1;
 }
 
+/** Resolves a stream URL that may be relative to the playlist itself (HLS master playlists). */
+QString resolveUrl(const QString& url, const QString& baseUrl)
+{
+    if (baseUrl.isEmpty() || url.contains("://"))
+        return url;
+
+    const QUrl resolved = QUrl(baseUrl).resolved(QUrl(url));
+    return resolved.isValid() ? resolved.toString() : url;
+}
+
+/** Name of a stream that has no #EXTINF title: its last path segment. */
+QString titleFromUrl(const QString& url)
+{
+    const QString name = QUrl(url).path().section('/', -1);
+    return name.isEmpty() ? url : name;
+}
+
 } // namespace
 
-QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, QString* error)
+QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, const QString& baseUrl, QString* error)
 {
     if (error)
         error->clear();
@@ -99,9 +117,9 @@ QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, QString* error)
         // A plain line is the stream URL of the preceding #EXTINF entry.
         if (hasPending)
         {
-            pending.url = line;
+            pending.url = resolveUrl(line, baseUrl);
             if (pending.name.isEmpty())
-                pending.name = line;
+                pending.name = titleFromUrl(pending.url);
             channels.append(pending);
             hasPending = false;
         }
@@ -110,8 +128,8 @@ QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, QString* error)
             // Tolerate playlists that contain bare URLs without any #EXTINF.
             IptvChannel channel;
             channel.id = nx::Uuid::createUuid();
-            channel.url = line;
-            channel.name = line;
+            channel.url = resolveUrl(line, baseUrl);
+            channel.name = titleFromUrl(channel.url);
             channels.append(channel);
         }
     }

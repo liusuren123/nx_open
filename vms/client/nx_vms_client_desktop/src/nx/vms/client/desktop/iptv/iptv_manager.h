@@ -159,6 +159,13 @@ private:
 
     bool startImport(const QString& source, const QString& name, const nx::Uuid& replaceId,
         ImportTarget target);
+    /**
+     * Appends ready-made entries to the current playlist, creating a default playlist if needed.
+     * Unlike startImport(), this is synchronous: a single stream URL needs no download.
+     */
+    bool addStreamToCurrentPlaylist(const QString& url, const QString& title);
+    /** Human readable name of a stream URL: its last path segment, or the URL itself. */
+    static QString streamTitle(const QString& url);
     /** Parses, stores and reports a downloaded/read playlist. Returns false on a parse failure. */
     bool finishImport(const QByteArray& data);
     /** Creates the resource for a channel and opens it, making it the current channel. */

@@ -714,8 +714,8 @@ Item
             Text
             {
                 Layout.fillWidth: true
-                text: qsTr("Enter an M3U playlist from an http(s) URL or a local file."
-                    + " Its channels are added to the current playlist.")
+                text: qsTr("Enter an M3U playlist (an http(s) URL or a local file), or a single"
+                    + " stream URL. Whatever it lists is added to the current playlist.")
                 color: ColorTheme.colors.light4
                 font.pixelSize: FontConfig.normal.pixelSize
                 wrapMode: Text.WordWrap
@@ -726,7 +726,7 @@ Item
                 id: sourceField
 
                 Layout.fillWidth: true
-                placeholderText: qsTr("http://host/playlist.m3u  or  C:\\list.m3u")
+                placeholderText: qsTr("http://host/playlist.m3u, rtsp://host/stream or C:\\list.m3u")
                 selectByMouse: true
                 onAccepted: addSourceDialog.submit()
             }

@@ -182,7 +182,55 @@ bool IptvManager::importFromFile(const QString& path, const QString& name)
 
 bool IptvManager::addSourceToCurrentPlaylist(const QString& source)
 {
-    return startImport(source.trimmed(), QString(), nx::Uuid(), ImportTarget::CurrentPlaylist);
+    const QString trimmed = source.trimmed();
+    m_lastError.clear();
+
+    if (trimmed.isEmpty())
+    {
+        m_lastError = tr("No playlist address given.");
+        return false;
+    }
+
+    // Anything with a non-http(s) scheme is a single stream (rtsp, rtmp, udp, ...): there is no
+    // playlist to download, so it is added as one entry right away.
+    if (trimmed.contains("://") && !isRemoteSource(trimmed))
+    {
+        const bool added = addStreamToCurrentPlaylist(trimmed, QString());
+        emit importFinished(added);
+        return added;
+    }
+
+    return startImport(trimmed, QString(), nx::Uuid(), ImportTarget::CurrentPlaylist);
+}
+
+QString IptvManager::streamTitle(const QString& url)
+{
+    const QString name = QUrl(url).path().section('/', -1);
+    return name.isEmpty() ? url : name;
+}
+
+bool IptvManager::addStreamToCurrentPlaylist(const QString& url, const QString& title)
+{
+    const auto playlistManager = appContext()->playlistManager();
+    if (!playlistManager)
+    {
+        m_lastError = tr("The playlist is not available.");
+        return false;
+    }
+
+    PlaylistEntry entry;
+    entry.url = url;
+    entry.title = title.isEmpty() ? streamTitle(url) : title;
+
+    const QString id = playlistManager->ensureCurrentPlaylist();
+    if (id.isEmpty() || !playlistManager->addEntries(id, {entry}))
+    {
+        m_lastError = tr("Failed to add the stream to the playlist.");
+        return false;
+    }
+
+    NX_INFO(typeid(IptvManager), "Added stream '%1' to the current playlist", url);
+    return true;
 }
 
 bool IptvManager::reloadPlaylist(const QString& id)
@@ -620,9 +668,19 @@ bool IptvManager::startImport(
 bool IptvManager::finishImport(const QByteArray& data)
 {
     QString parseError;
-    const QList<IptvChannel> channels = parseM3uPlaylist(data, &parseError);
+    const QString baseUrl = isRemoteSource(m_pendingSource) ? m_pendingSource : QString();
+    const QList<IptvChannel> channels = parseM3uPlaylist(data, baseUrl, &parseError);
     if (channels.isEmpty())
     {
+        // An http(s) source that is not an M3U channel list is a single stream: an HLS media
+        // playlist, for instance, only contains segment URLs. Add it as one entry rather than fail.
+        if (m_pendingTarget == ImportTarget::CurrentPlaylist && isRemoteSource(m_pendingSource))
+        {
+            const bool added = addStreamToCurrentPlaylist(m_pendingSource, QString());
+            emit importFinished(added);
+            return added;
+        }
+
         m_lastError = parseError.isEmpty() ? tr("The playlist contains no channels.") : parseError;
         NX_WARNING(this, "Failed to import playlist '%1': %2", m_pendingSource, m_lastError);
         emit importFinished(false);
