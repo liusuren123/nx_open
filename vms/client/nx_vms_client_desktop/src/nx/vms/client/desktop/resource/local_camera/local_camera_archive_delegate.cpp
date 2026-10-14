@@ -64,6 +64,9 @@ struct LocalCameraArchiveDelegate::Private
     /** Stream URL; empty for capture devices. */
     const QString url;
 
+    /** Set when the source is expected to be a media file rather than a live stream. */
+    const bool filePlaybackExpected = false;
+
     AVFormatContext* formatContext = nullptr;
     AVPacket* packet = nullptr;
     int videoStreamIndex = -1;
@@ -77,11 +80,19 @@ struct LocalCameraArchiveDelegate::Private
     qint64 firstPacketUs = 0;
     qint64 playbackStartUs = 0;
 
+    /** Set when the source is a finite, seekable file: it has a duration and can be seeked. */
+    bool filePlayback = false;
+
+    /** File duration and the timestamp of its first frame, both in microseconds. */
+    qint64 fileDurationUs = 0;
+    qint64 fileBaseTimestampUs = 0;
+
     QString lastError;
 };
 
-LocalCameraArchiveDelegate::LocalCameraArchiveDelegate(const QString& deviceId, const QString& url):
-    d(new Private{deviceId, url})
+LocalCameraArchiveDelegate::LocalCameraArchiveDelegate(const QString& deviceId, const QString& url,
+    bool filePlaybackExpected):
+    d(new Private{deviceId, url, filePlaybackExpected})
 {
     setObjectName("LocalCameraArchiveDelegate");
 }
@@ -178,14 +189,50 @@ bool LocalCameraArchiveDelegate::openStream()
         }
     }
 
-    NX_INFO(typeid(LocalCameraArchiveDelegate), "Opened local source '%1': %2x%3, %4 fps, audio: %5",
+    detectFilePlayback();
+
+    NX_INFO(typeid(LocalCameraArchiveDelegate),
+        "Opened local source '%1': %2x%3, %4 fps, audio: %5, %6",
         sourceDescription(),
         stream->codecpar->width,
         stream->codecpar->height,
         av_q2d(stream->avg_frame_rate),
-        d->audioStreamIndex >= 0);
+        d->audioStreamIndex >= 0,
+        d->filePlayback
+            ? QString("file, %1 s").arg(d->fileDurationUs / 1'000'000.0, 0, 'f', 3)
+            : QString("live"));
 
     return true;
+}
+
+void LocalCameraArchiveDelegate::detectFilePlayback()
+{
+    d->filePlayback = false;
+    d->fileDurationUs = 0;
+    d->fileBaseTimestampUs = 0;
+
+    // Only a source the user expects to be a file is checked. A live stream is never treated as a
+    // file even if its container happens to report a duration.
+    if (!d->filePlaybackExpected)
+        return;
+
+    // A file reports a finite duration and its I/O can seek. Anything else keeps being live.
+    const qint64 duration = d->formatContext->duration; //< In AV_TIME_BASE units (microseconds).
+    const bool ioSeekable = d->formatContext->pb
+        && (d->formatContext->pb->seekable & AVIO_SEEKABLE_NORMAL);
+    if (duration <= 0 || !ioSeekable)
+        return;
+
+    d->filePlayback = true;
+    d->fileDurationUs = duration;
+
+    // Report timestamps relative to the first frame, so the timeline starts at zero.
+    const AVStream* videoStream = d->formatContext->streams[d->videoStreamIndex];
+    if (videoStream && videoStream->start_time != AV_NOPTS_VALUE)
+    {
+        d->fileBaseTimestampUs =
+            av_rescale_q(videoStream->start_time, videoStream->time_base, AV_TIME_BASE_Q);
+    }
 }
 
 bool LocalCameraArchiveDelegate::openCaptureDevice()
@@ -363,6 +410,9 @@ void LocalCameraArchiveDelegate::closeStream()
     d->pacingStarted = false;
     d->firstPacketUs = 0;
     d->playbackStartUs = 0;
+    d->filePlayback = false;
+    d->fileDurationUs = 0;
+    d->fileBaseTimestampUs = 0;
 }
 
 bool LocalCameraArchiveDelegate::open(
@@ -396,19 +446,47 @@ void LocalCameraArchiveDelegate::pleaseStop()
 
 qint64 LocalCameraArchiveDelegate::startTime() const
 {
-    // A live source has no archive range.
+    // Both a live source and a file are reported from zero; a file's endTime() carries its length.
     return 0;
 }
 
 qint64 LocalCameraArchiveDelegate::endTime() const
 {
-    return 0;
+    return d->filePlayback ? d->fileDurationUs : 0;
 }
 
-qint64 LocalCameraArchiveDelegate::seek(qint64 /*time*/, bool /*findIFrame*/)
+qint64 LocalCameraArchiveDelegate::seek(qint64 time, bool findIFrame)
 {
     // Nothing to seek to in a live stream.
-    return -1;
+    if (!d->filePlayback || !d->formatContext)
+        return -1;
+
+    time = qMax(0ll, time);
+    const qint64 target = d->fileBaseTimestampUs + time;
+    const int result = av_seek_frame(d->formatContext, /*stream_index*/ -1, target,
+        findIFrame ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_ANY);
+    if (result < 0)
+    {
+        NX_WARNING(typeid(LocalCameraArchiveDelegate),
+            "Failed to seek local source '%1' to %2 us: %3",
+            sourceDescription(), time, result);
+        return -1;
+    }
+
+    // Drop the live pacing state: playback continues from the new position.
+    d->pacingStarted = false;
+
+    return time;
+}
+
+bool LocalCameraArchiveDelegate::isFilePlayback() const
+{
+    return d->filePlayback;
+}
+
+bool LocalCameraArchiveDelegate::isRealTimeSource() const
+{
+    return !d->filePlayback;
 }
 
 QnConstResourceVideoLayoutPtr LocalCameraArchiveDelegate::getVideoLayout()
@@ -429,21 +507,39 @@ bool LocalCameraArchiveDelegate::hasVideo() const
     return true;
 }
 
+qint64 LocalCameraArchiveDelegate::packetTimestampUs() const
+{
+    if (!d->packet)
+        return QDateTime::currentMSecsSinceEpoch() * 1000;
+
+    const qint64 rawTimestamp =
+        d->packet->dts != AV_NOPTS_VALUE ? d->packet->dts : d->packet->pts;
+
+    // Live data is timestamped with the wall clock, in microseconds.
+    if (!d->filePlayback || rawTimestamp == AV_NOPTS_VALUE)
+        return QDateTime::currentMSecsSinceEpoch() * 1000;
+
+    // File data keeps its own timeline, relative to the first frame, so seeking stays consistent.
+    const AVStream* stream = d->formatContext->streams[d->packet->stream_index];
+    const qint64 timestampUs = av_rescale_q(rawTimestamp, stream->time_base, AV_TIME_BASE_Q);
+    return qMax(0ll, timestampUs - d->fileBaseTimestampUs);
+}
+
 QnAbstractMediaDataPtr LocalCameraArchiveDelegate::makeVideoPacket()
 {
-    // Live data is timestamped with the wall clock, in microseconds.
     QnWritableCompressedVideoDataPtr video(
         new QnWritableCompressedVideoData(d->packet->size, d->codecParameters));
     video->m_data.write(reinterpret_cast<const char*>(d->packet->data), d->packet->size);
     video->compressionType = d->codecParameters->getAvCodecParameters()->codec_id;
-    video->timestamp = QDateTime::currentMSecsSinceEpoch() * 1000;
+    video->timestamp = packetTimestampUs();
     video->channelNumber = 0;
     video->width = d->codecParameters->getWidth();
     video->height = d->codecParameters->getHeight();
 
     if (d->packet->flags & AV_PKT_FLAG_KEY)
         video->flags |= QnAbstractMediaData::MediaFlags_AVKey;
-    video->flags |= QnAbstractMediaData::MediaFlags_LIVE;
+    if (!d->filePlayback)
+        video->flags |= QnAbstractMediaData::MediaFlags_LIVE;
 
     av_packet_unref(d->packet);
     return video;
@@ -456,14 +552,15 @@ QnAbstractMediaDataPtr LocalCameraArchiveDelegate::makeAudioPacket()
     QnWritableCompressedAudioDataPtr audio(
         new QnWritableCompressedAudioData(d->packet->size, d->audioCodecParameters));
     audio->channelNumber = 0;
-    audio->timestamp = QDateTime::currentMSecsSinceEpoch() * 1000;
+    audio->timestamp = packetTimestampUs();
     if (d->packet->duration > 0)
     {
         audio->duration = av_rescale_q(
             d->packet->duration, stream->time_base, AVRational{1, 1000000});
     }
     audio->m_data.write(reinterpret_cast<const char*>(d->packet->data), d->packet->size);
-    audio->flags |= QnAbstractMediaData::MediaFlags_LIVE;
+    if (!d->filePlayback)
+        audio->flags |= QnAbstractMediaData::MediaFlags_LIVE;
 
     av_packet_unref(d->packet);
     return audio;
@@ -500,12 +597,11 @@ QnAbstractMediaDataPtr LocalCameraArchiveDelegate::takePacket()
             continue;
         }
 
-        // Pace the stream against the wall clock. A live source already arrives in real time, so
-        // this is a no-op for it; a file-like source (an mp4 URL or a VOD HLS playlist) would
-        // otherwise be consumed at full speed.
+        // Pace a live stream against the wall clock, so the reader does not drain the socket at full
+        // speed. A file is read as fast as the pipeline requests it and paced by its timestamps.
         const AVPacket& packet = *d->packet;
         const qint64 rawTimestamp = packet.dts != AV_NOPTS_VALUE ? packet.dts : packet.pts;
-        if (rawTimestamp != AV_NOPTS_VALUE)
+        if (!d->filePlayback && rawTimestamp != AV_NOPTS_VALUE)
         {
             const qint64 packetUs = av_rescale_q(rawTimestamp,
                 d->formatContext->streams[streamIndex]->time_base, AVRational{1, 1000000});

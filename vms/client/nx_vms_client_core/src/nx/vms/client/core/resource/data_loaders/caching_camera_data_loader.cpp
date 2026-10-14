@@ -7,6 +7,7 @@
 #include <core/resource/avi/avi_resource.h>
 #include <core/resource/camera_bookmark.h>
 #include <core/resource/camera_resource.h>
+#include <core/resource/media_resource.h>
 #include <nx/fusion/model_functions.h>
 #include <nx/utils/datetime.h>
 #include <nx/utils/log/log.h>
@@ -16,12 +17,49 @@
 #include "flat_camera_data_loader.h"
 #include "layout_file_camera_data_loader.h"
 
+#include "abstract_camera_data_loader.h"
+
 namespace {
 
 qint64 requestIntervalMs()
 {
     return nx::vms::client::core::ini().cameraDataLoadingIntervalMs;
 }
+
+/**
+ * Provides the timeline of a locally played, seekable file (e.g. a media file opened by URL): it has
+ * a single recording period that spans the whole file.
+ */
+class LocalFileRangeDataLoader: public nx::vms::client::core::AbstractCameraDataLoader
+{
+public:
+    LocalFileRangeDataLoader(const QnResourcePtr& resource, Qn::TimePeriodContent dataType,
+        QObject* parent = nullptr):
+        AbstractCameraDataLoader(resource, dataType, parent)
+    {
+    }
+
+    void load(const QString& /*filter*/, const qint64 /*resolutionMs*/) override
+    {
+        m_loadedData = QnTimePeriodList();
+
+        if (m_dataType == Qn::RecordingContent)
+        {
+            if (const auto media = m_resource.dynamicCast<QnMediaResource>())
+            {
+                if (const auto range = media->localFileRangeUs())
+                {
+                    const qint64 startMs = range->first / 1000;
+                    const qint64 durationMs = (range->second - range->first) / 1000;
+                    if (durationMs > 0)
+                        m_loadedData.push_back(QnTimePeriod(startMs, durationMs));
+                }
+            }
+        }
+
+        emit ready(0);
+    }
+};
 
 } // namespace
 
@@ -64,6 +102,8 @@ CachingCameraDataLoader::~CachingCameraDataLoader() {
 bool CachingCameraDataLoader::supportedResource(const QnMediaResourcePtr &resource) {
     bool result = !resource.dynamicCast<QnVirtualCameraResource>().isNull();
     result |= !resource.dynamicCast<QnAviResource>().isNull();
+    // A locally played, seekable file (e.g. a media file opened by URL) has its own timeline.
+    result |= resource->localFileRangeUs().has_value();
     return result;
 }
 
@@ -88,6 +128,8 @@ void CachingCameraDataLoader::initLoaders() {
             loader = new FlatCameraDataLoader(camera, dataType);
         else if (aviFile)
             loader = new QnLayoutFileCameraDataLoader(aviFile, dataType);
+        else if (m_resource->localFileRangeUs().has_value())
+            loader = new LocalFileRangeDataLoader(m_resource, dataType);
 
         m_loaders[i].reset(loader);
 

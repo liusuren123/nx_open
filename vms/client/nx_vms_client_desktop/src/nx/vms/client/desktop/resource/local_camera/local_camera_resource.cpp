@@ -23,9 +23,14 @@ LocalCameraResource::LocalCameraResource(const QString& deviceId, const QString&
 
 LocalCameraResource::LocalCameraResource(const LocalCameraSource& source):
     m_url(source.streamUrl()),
-    m_sourceId(source.id)
+    m_sourceId(source.id),
+    m_seekableFile(source.seekableFile),
+    m_durationUs(source.durationUs)
 {
-    addFlags(Qn::local_live_cam);
+    // A finite, seekable file is played back like a local recording (with a timeline and seeking);
+    // anything else is a live stream.
+    if (!m_seekableFile)
+        addFlags(Qn::local_live_cam);
 
     // The resource name and URL are used for display and for layout descriptors, so they must never
     // contain the credentials from the stream URL. The full URL is kept in m_url and is only passed
@@ -43,6 +48,15 @@ void LocalCameraResource::updateFromSource(const LocalCameraSource& source)
     m_url = source.streamUrl();
     setName(source.displayName());
     setUrl(source.displayName());
+
+    m_seekableFile = source.seekableFile;
+    m_durationUs = source.durationUs;
+
+    // Keep the live/file classification in sync after an edit.
+    if (m_seekableFile)
+        removeFlags(Qn::local_live_cam);
+    else
+        addFlags(Qn::local_live_cam);
 }
 
 nx::Uuid LocalCameraResource::resourceIdForDevice(const QString& deviceId)
@@ -62,7 +76,7 @@ QnAbstractStreamDataProvider* LocalCameraResource::createDataProvider(Qn::Connec
     // delegate, so the reader (and the camera display behind it) get everything they need.
     auto reader = new QnArchiveStreamReader(toSharedPointer(this));
     reader->setArchiveDelegate(std::unique_ptr<QnAbstractArchiveDelegate>(
-        new LocalCameraArchiveDelegate(m_deviceId, m_url)));
+        new LocalCameraArchiveDelegate(m_deviceId, m_url, m_seekableFile)));
     return reader;
 }
 
@@ -72,6 +86,14 @@ QnConstResourceVideoLayoutPtr LocalCameraResource::getVideoLayout(const QnAbstra
     static const QnConstResourceVideoLayoutPtr layout =
         std::make_shared<QnDefaultResourceVideoLayout>();
     return layout;
+}
+
+std::optional<std::pair<qint64, qint64>> LocalCameraResource::localFileRangeUs() const
+{
+    if (!m_seekableFile || m_durationUs <= 0)
+        return std::nullopt;
+
+    return std::pair<qint64, qint64>(0, m_durationUs);
 }
 
 } // namespace nx::vms::client::desktop

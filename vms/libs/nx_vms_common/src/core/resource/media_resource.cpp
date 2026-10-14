@@ -153,6 +153,12 @@ std::optional<int> QnMediaResource::forcedRotation() const
     return rotation.toInt();
 }
 
+std::optional<std::pair<qint64, qint64>> QnMediaResource::localFileRangeUs() const
+{
+    // Not a locally played file by default; local media resources override this.
+    return std::nullopt;
+}
+
 void QnMediaResource::setForcedRotation(std::optional<int> value)
 {
     QString stringValue;

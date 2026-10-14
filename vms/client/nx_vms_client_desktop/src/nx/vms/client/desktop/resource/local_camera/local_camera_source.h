@@ -41,6 +41,15 @@ struct LocalCameraSource
     /** Password, if the source requires authentication. */
     QString password;
 
+    /**
+     * Set when the URL was found to be a finite, seekable media file rather than a live stream.
+     * Such a source is played back like a local recording: with a timeline and seeking support.
+     */
+    bool seekableFile = false;
+
+    /** Duration of a seekable file source, in microseconds; zero when unknown or not a file. */
+    qint64 durationUs = 0;
+
     bool operator==(const LocalCameraSource& other) const = default;
 
     /**
@@ -57,6 +66,14 @@ struct LocalCameraSource
     QString displayName() const;
 };
 
-NX_REFLECTION_INSTRUMENT(LocalCameraSource, (id)(name)(url)(username)(password))
+NX_REFLECTION_INSTRUMENT(LocalCameraSource,
+    (id)(name)(url)(username)(password)(seekableFile)(durationUs))
+
+/**
+ * Checks whether the source URL is a finite, seekable media file (rather than a live stream) and
+ * records the result on the source, so it can later be played back with a seekable timeline. Only
+ * network protocols that can serve a file are probed; a camera stream is always live.
+ */
+void classifyLocalCameraSource(LocalCameraSource& source);
 
 } // namespace nx::vms::client::desktop

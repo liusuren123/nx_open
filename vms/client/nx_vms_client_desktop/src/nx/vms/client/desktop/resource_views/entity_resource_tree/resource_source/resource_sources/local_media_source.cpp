@@ -5,19 +5,25 @@
 #include <core/resource_management/resource_pool.h>
 #include <core/resource/avi/avi_resource.h>
 
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_resource.h>
+
 namespace nx::vms::client::desktop {
 namespace entity_resource_tree {
 
 namespace {
 
 /**
- * Client-side live cameras (USB / built-in) are local, self-contained media sources, so they are
- * listed along with local media files, as opposed to the desktop camera which is exposed separately.
+ * Client-side sources (USB / built-in capture devices and user-configured stream sources, whether
+ * live or a media file) are local, self-contained media sources, so they are listed along with
+ * local media files, as opposed to the desktop camera which is exposed separately.
  */
 bool isLocalCamera(const QnResourcePtr& resource)
 {
+    if (resource->hasFlags(Qn::desktop_camera))
+        return false;
+
     return resource->hasFlags(Qn::local_live_cam)
-        && !resource->hasFlags(Qn::desktop_camera);
+        || !resource.dynamicCast<LocalCameraResource>().isNull();
 }
 
 } // namespace
@@ -81,7 +87,7 @@ QVector<QnResourcePtr> LocalMediaSource::getResources()
     QVector<QnResourcePtr> result;
     std::copy(std::cbegin(aviResources), std::cend(aviResources), std::back_inserter(result));
 
-    for (const auto& resource: m_resourcePool->getResourcesWithFlag(Qn::local_live_cam))
+    for (const auto& resource: m_resourcePool->getResources<LocalCameraResource>())
     {
         if (isLocalCamera(resource))
             result.push_back(resource);

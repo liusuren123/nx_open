@@ -2,6 +2,10 @@
 
 #include "local_camera_source.h"
 
+#include <QtCore/QUrl>
+
+#include "local_camera_archive_delegate.h"
+
 namespace nx::vms::client::desktop {
 
 QString localCameraSourceUrlForDisplay(const QString& url)
@@ -65,6 +69,28 @@ QString LocalCameraSource::streamUrl() const
 QString LocalCameraSource::displayName() const
 {
     return name.isEmpty() ? localCameraSourceUrlForDisplay(url) : name;
+}
+
+void classifyLocalCameraSource(LocalCameraSource& source)
+{
+    source.seekableFile = false;
+    source.durationUs = 0;
+
+    const QString scheme = QUrl(source.streamUrl()).scheme().toLower();
+    if (scheme != "http" && scheme != "https")
+        return;
+
+    LocalCameraArchiveDelegate probe(QString(), source.streamUrl(),
+        /*filePlaybackExpected*/ true);
+    if (!probe.open(QnResourcePtr()) || !probe.isFilePlayback())
+    {
+        probe.close();
+        return;
+    }
+
+    source.seekableFile = true;
+    source.durationUs = probe.endTime();
+    probe.close();
 }
 
 } // namespace nx::vms::client::desktop

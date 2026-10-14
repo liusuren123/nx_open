@@ -82,6 +82,7 @@ bool LocalCameraManager::addSource(const QString& name, const QString& url,
     source.url = trimmedUrl;
     source.username = username.trimmed();
     source.password = password;
+    classifyLocalCameraSource(source);
     list.append(source);
 
     m_settings->localCameraSources = list; //< Emits changed => syncPool().
@@ -126,6 +127,7 @@ bool LocalCameraManager::updateSource(const QString& id, const QString& name, co
     source.username = username.trimmed();
     if (!password.isEmpty())
         source.password = password; //< An empty password keeps the stored one.
+    classifyLocalCameraSource(source);
 
     m_settings->localCameraSources = list; //< Emits changed => syncPool().
     return true;

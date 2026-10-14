@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <optional>
+#include <utility>
+
 #include <QtCore/QSize>
 
 #include <core/resource/resource.h>
@@ -38,6 +41,13 @@ public:
     virtual QnConstResourceVideoLayoutPtr getVideoLayout(const QnAbstractStreamDataProvider* dataProvider = nullptr);
     virtual AudioLayoutConstPtr getAudioLayout(const QnAbstractStreamDataProvider* dataProvider = nullptr) const;
     virtual bool hasVideo(const QnAbstractStreamDataProvider* dataProvider = nullptr) const = 0;
+
+    /**
+     * Range of a locally played, seekable media file in microseconds as (start, end), or nullopt
+     * when the resource is not such a file (a live camera, a remote archive, ...). It lets the
+     * timeline show the length of a source that is not backed by a media server.
+     */
+    virtual std::optional<std::pair<qint64, qint64>> localFileRangeUs() const;
 
     virtual nx::vms::api::dewarping::MediaData getDewarpingParams() const;
     virtual void setDewarpingParams(const nx::vms::api::dewarping::MediaData& params);

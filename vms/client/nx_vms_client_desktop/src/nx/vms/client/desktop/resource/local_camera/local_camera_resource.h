@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <optional>
+#include <utility>
+
 #include <QtCore/QString>
 
 #include <nx/streaming/abstract_archive_resource.h>
@@ -38,6 +41,9 @@ public:
     /** Whether this is a user-configured source rather than an auto-detected capture device. */
     bool isUrlSource() const { return !m_url.isEmpty(); }
 
+    /** Whether the URL turned out to be a finite, seekable media file rather than a live stream. */
+    bool isSeekableFileSource() const { return m_seekableFile; }
+
     const QString& url() const { return m_url; }
 
     /** Id of the configuring LocalCameraSource entry; null for capture devices. */
@@ -57,6 +63,9 @@ public:
     virtual QnConstResourceVideoLayoutPtr getVideoLayout(
         const QnAbstractStreamDataProvider* dataProvider = nullptr) override;
 
+    /** Range of the file, so the timeline can show its length. Not a file: nullopt. */
+    virtual std::optional<std::pair<qint64, qint64>> localFileRangeUs() const override;
+
 private:
     /** Capture device name, empty for URL sources. */
     QString m_deviceId;
@@ -66,6 +75,12 @@ private:
 
     /** Id of the configuring source entry; null for capture devices. */
     nx::Uuid m_sourceId;
+
+    /** Set when the URL is a finite, seekable media file; playback then gets a seekable timeline. */
+    bool m_seekableFile = false;
+
+    /** Duration of the file, in microseconds. */
+    qint64 m_durationUs = 0;
 };
 
 } // namespace nx::vms::client::desktop

@@ -555,6 +555,7 @@ bool IptvManager::openChannelAt(const IptvPlaylist& playlist, int index)
     source.url = channel.url;
     source.username = channel.username;
     source.password = channel.password;
+    classifyLocalCameraSource(source);
 
     const QnResourcePtr resource = ensureStreamResource(source);
     if (!resource)
@@ -616,6 +617,7 @@ bool IptvManager::openStream(const QString& url, const QString& title,
     source.url = url;
     source.username = username;
     source.password = password;
+    classifyLocalCameraSource(source);
 
     const QnResourcePtr resource = ensureStreamResource(source);
     if (!resource)
