@@ -25,6 +25,7 @@ public:
         FileNameRole = Qt::UserRole + 1,
         FilePathRole,
         IsFolderRole,
+        IsStreamRole,
         DurationMsRole,
     };
     Q_ENUM(Role)

@@ -57,6 +57,12 @@ public:
      */
     Q_INVOKABLE bool addPaths(const QString& id, const QStringList& paths);
 
+    /**
+     * Appends ready-made entries to the given playlist. Used for network streams, whose entries
+     * cannot be derived from a file path.
+     */
+    bool addEntries(const QString& id, const QList<PlaylistEntry>& entries);
+
     /** QML-friendly variant of addPaths() that accepts file/folder dialog URLs. */
     Q_INVOKABLE bool addFiles(const QString& id, const QList<QUrl>& urls);
 

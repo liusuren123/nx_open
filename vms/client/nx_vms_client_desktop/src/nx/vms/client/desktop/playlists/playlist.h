@@ -12,21 +12,35 @@
 namespace nx::vms::client::desktop {
 
 /**
- * A single entry of a local playlist. The entry is either a media file or a folder; folders are
- * scanned recursively when the playlist is played. Only the path is stored, so playlists survive
- * across runs and are independent of the resource pool.
+ * A single entry of a local playlist. The entry is either a media file, a folder, or a network
+ * stream (an IPTV channel and the like). Folders are scanned recursively when the playlist is
+ * played. Only the path or the URL is stored, so playlists survive across runs and are independent
+ * of the resource pool.
  */
 struct PlaylistEntry
 {
-    /** Absolute path with native separators. */
+    /** Absolute path with native separators; empty for a network stream. */
     QString path;
 
     /** Whether the path points to a folder to be expanded. */
     bool isFolder = false;
 
+    /** URL of a network stream; empty for a local file or folder. */
+    QString url;
+
+    /** Credentials of a stream; ignored for local media. */
+    QString username;
+    QString password;
+
+    /** Title shown in the playlist; local media is named after its file instead. */
+    QString title;
+
+    /** Whether the entry is a network stream rather than a local file or folder. */
+    bool isStream() const { return !url.isEmpty(); }
+
     bool operator==(const PlaylistEntry& other) const = default;
 };
-NX_REFLECTION_INSTRUMENT(PlaylistEntry, (path)(isFolder))
+NX_REFLECTION_INSTRUMENT(PlaylistEntry, (path)(isFolder)(url)(username)(password)(title))
 
 /** A named, ordered collection of local media entries. */
 struct Playlist

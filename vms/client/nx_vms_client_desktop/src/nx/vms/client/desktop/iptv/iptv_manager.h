@@ -4,14 +4,17 @@
 
 #include <optional>
 
+#include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtCore/QVariantList>
 #include <QtNetwork/QNetworkAccessManager>
 
+#include <core/resource/resource_fwd.h>
 #include <nx/utils/uuid.h>
 
 #include "iptv_playlist.h"
+#include "../resource/local_camera/local_camera_source.h"
 
 class QNetworkReply;
 class QTimer;
@@ -80,6 +83,20 @@ public:
     /** Imports a playlist from a local .m3u/.m3u8 file. */
     Q_INVOKABLE bool importFromFile(const QString& path, const QString& name);
 
+    /**
+     * Downloads or reads the playlist at the given source and appends its channels to the current
+     * local playlist. Unlike importFromUrl(), nothing is kept as a reusable IPTV playlist: the
+     * channels become ordinary playlist entries.
+     */
+    Q_INVOKABLE bool addSourceToCurrentPlaylist(const QString& source);
+
+    /**
+     * Opens a network stream in the current layout, reusing the resource created for it earlier.
+     * Playlist entries store a stream URL rather than a file path, so they are opened through here.
+     */
+    Q_INVOKABLE bool openStream(const QString& url, const QString& title,
+        const QString& username, const QString& password);
+
     /** Re-downloads or re-reads a previously imported playlist. */
     Q_INVOKABLE bool reloadPlaylist(const QString& id);
 
@@ -131,11 +148,25 @@ signals:
     void typedChannelNumberChanged();
 
 private:
-    bool startImport(const QString& source, const QString& name, const nx::Uuid& replaceId);
+    /** What to do with the channels of a playlist that has just been parsed. */
+    enum class ImportTarget
+    {
+        /** Keeps them as a reusable playlist, shown in the IPTV dialog. */
+        StorePlaylist,
+        /** Appends them to the current local playlist, as ordinary entries. */
+        CurrentPlaylist,
+    };
+
+    bool startImport(const QString& source, const QString& name, const nx::Uuid& replaceId,
+        ImportTarget target);
     /** Parses, stores and reports a downloaded/read playlist. Returns false on a parse failure. */
     bool finishImport(const QByteArray& data);
     /** Creates the resource for a channel and opens it, making it the current channel. */
     bool openChannelAt(const IptvPlaylist& playlist, int index);
+    /** Finds the pool resource that plays the given stream, creating it when it is missing. */
+    QnResourcePtr ensureStreamResource(const LocalCameraSource& source);
+    /** Returns the resource id of a stream URL, so that the same stream reuses one resource. */
+    nx::Uuid streamResourceId(const QString& url);
     std::optional<IptvChannel> currentChannel() const;
     void onDownloadFinished();
     void onImportTimeout();
@@ -166,6 +197,7 @@ private:
     QString m_pendingSource;
     QString m_pendingName;
     nx::Uuid m_pendingReplaceId;
+    ImportTarget m_pendingTarget = ImportTarget::StorePlaylist;
     bool m_importing = false;
 
     nx::Uuid m_currentPlaylistId;
@@ -175,6 +207,9 @@ private:
     QString m_typedNumber;
 
     QPointer<SceneBanner> m_banner;
+
+    /** Resource ids of streams opened outside the playlists, keyed by URL. */
+    QHash<QString, nx::Uuid> m_streamIds;
 };
 
 } // namespace nx::vms::client::desktop

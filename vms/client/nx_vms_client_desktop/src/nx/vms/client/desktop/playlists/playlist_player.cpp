@@ -10,6 +10,7 @@
 #include <core/resource_management/resource_pool.h>
 #include <nx/streaming/abstract_archive_stream_reader.h>
 #include <nx/vms/client/desktop/application_context.h>
+#include <nx/vms/client/desktop/iptv/iptv_manager.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/actions.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
@@ -56,12 +57,12 @@ void PlaylistPlayer::setCurrentPlaylist(const QString& playlistId)
 {
     m_playlistId = playlistId;
     m_index = -1;
-    rebuildFiles();
+    rebuildEntries();
 }
 
-void PlaylistPlayer::rebuildFiles()
+void PlaylistPlayer::rebuildEntries()
 {
-    m_files.clear();
+    m_entries.clear();
 
     const auto manager = playlistManager();
     if (!manager || m_playlistId.isEmpty())
@@ -69,7 +70,24 @@ void PlaylistPlayer::rebuildFiles()
 
     const auto playlist = manager->playlist(m_playlistId);
     for (const auto& entry: playlist.entries)
-        m_files.append(QnFileProcessor::findAcceptedFiles(entry.path));
+        appendExpanded(entry);
+}
+
+void PlaylistPlayer::appendExpanded(const PlaylistEntry& entry)
+{
+    // Streams are played as they are; folders are expanded into the media files they contain.
+    if (entry.isStream())
+    {
+        m_entries.append(entry);
+        return;
+    }
+
+    for (const QString& file: QnFileProcessor::findAcceptedFiles(entry.path))
+    {
+        PlaylistEntry expanded;
+        expanded.path = file;
+        m_entries.append(expanded);
+    }
 }
 
 void PlaylistPlayer::playEntry(const QString& playlistId, int row)
@@ -84,29 +102,29 @@ void PlaylistPlayer::playEntry(const QString& playlistId, int row)
 
     m_playlistId = playlistId;
 
-    // Build the flat file list, remembering the position of the requested entry.
-    m_files.clear();
+    // Build the flat entry list, remembering the position of the requested entry.
+    m_entries.clear();
     int startIndex = -1;
     for (int i = 0; i < static_cast<int>(playlist.entries.size()); ++i)
     {
         if (i == row)
-            startIndex = static_cast<int>(m_files.size());
-        m_files.append(QnFileProcessor::findAcceptedFiles(playlist.entries[i].path));
+            startIndex = static_cast<int>(m_entries.size());
+        appendExpanded(playlist.entries[i]);
     }
 
-    if (startIndex < 0 || startIndex >= static_cast<int>(m_files.size()))
+    if (startIndex < 0 || startIndex >= static_cast<int>(m_entries.size()))
         return;
 
     m_index = startIndex;
-    openCurrentFile();
+    openCurrentEntry();
 }
 
 void PlaylistPlayer::playNext()
 {
-    if (m_index + 1 < static_cast<int>(m_files.size()))
+    if (m_index + 1 < static_cast<int>(m_entries.size()))
     {
         ++m_index;
-        openCurrentFile();
+        openCurrentEntry();
     }
 }
 
@@ -115,17 +133,28 @@ void PlaylistPlayer::playPrevious()
     if (m_index > 0)
     {
         --m_index;
-        openCurrentFile();
+        openCurrentEntry();
     }
 }
 
-void PlaylistPlayer::openCurrentFile()
+void PlaylistPlayer::openCurrentEntry()
 {
-    if (m_index < 0 || m_index >= static_cast<int>(m_files.size()))
+    if (m_index < 0 || m_index >= static_cast<int>(m_entries.size()))
         return;
 
+    const PlaylistEntry& entry = m_entries.at(m_index);
+
+    // A live stream never ends, so there is nothing to hook for advancing to the next entry.
+    if (entry.isStream())
+    {
+        m_currentResource.reset();
+        if (const auto iptvManager = appContext()->iptvManager())
+            iptvManager->openStream(entry.url, entry.title, entry.username, entry.password);
+        return;
+    }
+
     const auto resources = QnFileProcessor::createResourcesForFiles(
-        {m_files.at(m_index)}, system()->resourcePool());
+        {entry.path}, system()->resourcePool());
     if (resources.isEmpty())
         return;
 
@@ -171,7 +200,7 @@ void PlaylistPlayer::hookWidget(QnResourceWidget* widget)
     reader->setEndOfPlaybackHandler(
         [this, widgetGuard]()
         {
-            if (m_index + 1 >= static_cast<int>(m_files.size()))
+            if (m_index + 1 >= static_cast<int>(m_entries.size()))
                 return; //< Nothing to advance to.
 
             const auto layout = workbench() ? workbench()->currentLayout() : nullptr;

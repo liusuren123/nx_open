@@ -4,10 +4,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import QtQuick.Window
 import QtQml
 
 import Nx.Core 1.0
 import Nx.Controls 1.0 as NxControls
+import Nx.Dialogs 1.0 as NxDialogs
 
 import nx.vms.client.core 1.0
 import nx.vms.client.desktop 1.0
@@ -330,7 +332,9 @@ Item
                 sourceSize: Qt.size(16, 16)
                 source: isFolder
                     ? "image://skin/20x20/Outline/folder.svg?primary=light12"
-                    : "image://skin/20x20/Outline/play.svg?primary=light12"
+                    : (isStream
+                        ? "image://skin/20x20/Outline/earth.svg?primary=light12"
+                        : "image://skin/20x20/Outline/play.svg?primary=light12")
             }
 
             Text
@@ -419,6 +423,20 @@ Item
                 icon.source: "image://skin/20x20/Outline/folder.svg"
                 GlobalToolTip.text: qsTr("Add folder")
                 onClicked: addFolderDialog.open()
+            }
+
+            ToolButton
+            {
+                anchors.verticalCenter: parent.verticalCenter
+                icon.source: "image://skin/20x20/Outline/earth.svg"
+                GlobalToolTip.text: qsTr("Add program source")
+                onClicked:
+                {
+                    sourceField.text = ""
+                    errorText.text = ""
+                    addSourceDialog.show()
+                    sourceField.forceActiveFocus()
+                }
             }
 
             ToolButton
@@ -646,6 +664,101 @@ Item
 
         title: qsTr("Add Folder to Playlist")
         onAccepted: PlaylistManager.addFilesToCurrentPlaylist([selectedFolder])
+    }
+
+    // Adds the channels of an M3U program source (an IPTV playlist) as ordinary playlist entries.
+    // A window-based dialog is required: the panel itself lives in a small QQuickWidget, which
+    // would clip a popup-style dialog.
+    NxDialogs.Dialog
+    {
+        id: addSourceDialog
+
+        title: qsTr("Add Program Source")
+        modality: Qt.ApplicationModal
+        transientParent: playlistBrowser.Window.window
+
+        width: 520
+        height: 220
+        x: (Screen.width - width) / 2
+        y: (Screen.height - height) / 2
+
+        function submit()
+        {
+            errorText.text = ""
+            if (!IptvManager.addSourceToCurrentPlaylist(sourceField.text.trim()))
+                errorText.text = IptvManager.lastError()
+        }
+
+        contentItem: ColumnLayout
+        {
+            spacing: 8
+
+            Text
+            {
+                Layout.fillWidth: true
+                text: qsTr("Enter an M3U playlist from an http(s) URL or a local file."
+                    + " Its channels are added to the current playlist.")
+                color: ColorTheme.colors.light4
+                font.pixelSize: FontConfig.normal.pixelSize
+                wrapMode: Text.WordWrap
+            }
+
+            TextField
+            {
+                id: sourceField
+
+                Layout.fillWidth: true
+                placeholderText: qsTr("http://host/playlist.m3u  or  C:\\list.m3u")
+                selectByMouse: true
+                onAccepted: addSourceDialog.submit()
+            }
+
+            RowLayout
+            {
+                Layout.fillWidth: true
+
+                Item { Layout.fillWidth: true }
+
+                NxControls.Button
+                {
+                    text: qsTr("Add")
+                    enabled: sourceField.text.length > 0 && !IptvManager.importing
+                    onClicked: addSourceDialog.submit()
+                }
+            }
+
+            Text
+            {
+                id: errorText
+
+                Layout.fillWidth: true
+                color: ColorTheme.colors.red
+                wrapMode: Text.WordWrap
+                visible: text.length > 0
+            }
+        }
+
+        buttonBox: NxControls.DialogButtonBox
+        {
+            buttonLayout: NxControls.DialogButtonBox.KdeLayout
+            standardButtons: NxControls.DialogButtonBox.Close
+        }
+
+        Connections
+        {
+            target: IptvManager
+
+            function onImportFinished(ok)
+            {
+                if (!addSourceDialog.visible)
+                    return
+
+                if (ok)
+                    addSourceDialog.close()
+                else
+                    errorText.text = IptvManager.lastError()
+            }
+        }
     }
 
     Dialog

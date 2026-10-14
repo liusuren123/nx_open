@@ -209,6 +209,22 @@ bool PlaylistManager::addPaths(const QString& id, const QStringList& paths)
     return true;
 }
 
+bool PlaylistManager::addEntries(const QString& id, const QList<PlaylistEntry>& entries)
+{
+    if (entries.isEmpty())
+        return false;
+
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    list[index].entries.append(entries);
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
 bool PlaylistManager::addFiles(const QString& id, const QList<QUrl>& urls)
 {
     QStringList paths;

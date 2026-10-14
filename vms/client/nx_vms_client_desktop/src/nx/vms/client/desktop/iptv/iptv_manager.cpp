@@ -26,6 +26,7 @@
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/action_parameters.h>
 #include <nx/vms/client/desktop/menu/actions.h>
+#include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/settings/local_settings.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/client/desktop/ui/scene/widgets/scene_banners.h>
@@ -171,12 +172,17 @@ QString IptvManager::lastError() const
 
 bool IptvManager::importFromUrl(const QString& url, const QString& name)
 {
-    return startImport(url.trimmed(), name, nx::Uuid());
+    return startImport(url.trimmed(), name, nx::Uuid(), ImportTarget::StorePlaylist);
 }
 
 bool IptvManager::importFromFile(const QString& path, const QString& name)
 {
-    return startImport(path.trimmed(), name, nx::Uuid());
+    return startImport(path.trimmed(), name, nx::Uuid(), ImportTarget::StorePlaylist);
+}
+
+bool IptvManager::addSourceToCurrentPlaylist(const QString& source)
+{
+    return startImport(source.trimmed(), QString(), nx::Uuid(), ImportTarget::CurrentPlaylist);
 }
 
 bool IptvManager::reloadPlaylist(const QString& id)
@@ -185,7 +191,7 @@ bool IptvManager::reloadPlaylist(const QString& id)
     if (!playlist)
         return false;
 
-    return startImport(playlist->source, playlist->name, playlist->id);
+    return startImport(playlist->source, playlist->name, playlist->id, ImportTarget::StorePlaylist);
 }
 
 bool IptvManager::removePlaylist(const QString& id)
@@ -472,31 +478,19 @@ bool IptvManager::openChannelAt(const IptvPlaylist& playlist, int index)
         return false;
 
     const IptvChannel& channel = playlist.channels[index];
-    if (channel.url.isEmpty())
-        return false;
 
-    auto systemContext = appContext()->currentSystemContext();
-    auto pool = systemContext ? systemContext->resourcePool() : nullptr;
-    if (!pool)
-        return false;
+    LocalCameraSource source;
+    source.id = channel.id;
+    source.name = channel.group.isEmpty()
+        ? channel.name
+        : QString("%1 \u00b7 %2").arg(channel.group, channel.name); //< Group separator dot.
+    source.url = channel.url;
+    source.username = channel.username;
+    source.password = channel.password;
 
-    // A resource is created on demand and kept, so re-opening a channel is cheap. The rest of the
-    // playlist is never materialized.
-    QnResourcePtr resource = pool->getResourceById(channel.id);
+    const QnResourcePtr resource = ensureStreamResource(source);
     if (!resource)
-    {
-        LocalCameraSource source;
-        source.id = channel.id;
-        source.name = channel.group.isEmpty()
-            ? channel.name
-            : QString("%1 \u00b7 %2").arg(channel.group, channel.name); //< Group separator dot.
-        source.url = channel.url;
-        source.username = channel.username;
-        source.password = channel.password;
-
-        resource = QnResourcePtr(new LocalCameraResource(source));
-        pool->addResources(QnResourceList{resource});
-    }
+        return false;
 
     auto windowContext = appContext()->mainWindowContext();
     if (!windowContext || !windowContext->menu())
@@ -512,8 +506,63 @@ bool IptvManager::openChannelAt(const IptvPlaylist& playlist, int index)
     return true;
 }
 
+QnResourcePtr IptvManager::ensureStreamResource(const LocalCameraSource& source)
+{
+    if (source.url.isEmpty())
+        return {};
+
+    auto systemContext = appContext()->currentSystemContext();
+    auto pool = systemContext ? systemContext->resourcePool() : nullptr;
+    if (!pool)
+        return {};
+
+    // A resource is created on demand and kept, so re-opening a stream is cheap.
+    if (const QnResourcePtr existing = pool->getResourceById(source.id))
+        return existing;
+
+    QnResourcePtr resource(new LocalCameraResource(source));
+    pool->addResources(QnResourceList{resource});
+    return resource;
+}
+
+nx::Uuid IptvManager::streamResourceId(const QString& url)
+{
+    const auto it = m_streamIds.constFind(url);
+    if (it != m_streamIds.constEnd())
+        return it.value();
+
+    const nx::Uuid id = nx::Uuid::createUuid();
+    m_streamIds.insert(url, id);
+    return id;
+}
+
+bool IptvManager::openStream(const QString& url, const QString& title,
+    const QString& username, const QString& password)
+{
+    if (url.isEmpty())
+        return false;
+
+    LocalCameraSource source;
+    source.id = streamResourceId(url);
+    source.name = title.isEmpty() ? url : title;
+    source.url = url;
+    source.username = username;
+    source.password = password;
+
+    const QnResourcePtr resource = ensureStreamResource(source);
+    if (!resource)
+        return false;
+
+    auto windowContext = appContext()->mainWindowContext();
+    if (!windowContext || !windowContext->menu())
+        return false;
+
+    windowContext->menu()->trigger(menu::OpenInCurrentLayoutAction, menu::Parameters(resource));
+    return true;
+}
+
 bool IptvManager::startImport(
-    const QString& source, const QString& name, const nx::Uuid& replaceId)
+    const QString& source, const QString& name, const nx::Uuid& replaceId, ImportTarget target)
 {
     if (!m_settings)
         return false;
@@ -535,6 +584,7 @@ bool IptvManager::startImport(
     m_pendingSource = source;
     m_pendingName = name;
     m_pendingReplaceId = replaceId;
+    m_pendingTarget = target;
 
     if (!isRemoteSource(source))
     {
@@ -586,6 +636,46 @@ bool IptvManager::finishImport(const QByteArray& data)
         : m_pendingName.trimmed();
     playlist.source = m_pendingSource;
     playlist.channels = channels;
+
+    if (m_pendingTarget == ImportTarget::CurrentPlaylist)
+    {
+        // The channels become ordinary playlist entries rather than a reusable IPTV playlist.
+        const auto playlistManager = appContext()->playlistManager();
+        if (!playlistManager)
+        {
+            m_lastError = tr("The playlist is not available.");
+            emit importFinished(false);
+            return false;
+        }
+
+        QList<PlaylistEntry> entries;
+        entries.reserve(channels.size());
+        for (const IptvChannel& channel: channels)
+        {
+            PlaylistEntry entry;
+            entry.url = channel.url;
+            entry.username = channel.username;
+            entry.password = channel.password;
+            entry.title = channel.group.isEmpty()
+                ? channel.name
+                : QString("%1 \u00b7 %2").arg(channel.group, channel.name);
+            entries.append(entry);
+        }
+
+        const QString id = playlistManager->ensureCurrentPlaylist();
+        if (id.isEmpty() || !playlistManager->addEntries(id, entries))
+        {
+            m_lastError = tr("Failed to add the channels to the playlist.");
+            emit importFinished(false);
+            return false;
+        }
+
+        NX_INFO(typeid(IptvManager), "Added %1 channel(s) from '%2' to the current playlist",
+            channels.size(), m_pendingSource);
+
+        emit importFinished(true);
+        return true;
+    }
 
     NX_INFO(typeid(IptvManager), "Imported playlist '%1' from '%2': %3 channel(s)",
         playlist.name, m_pendingSource, channels.size());

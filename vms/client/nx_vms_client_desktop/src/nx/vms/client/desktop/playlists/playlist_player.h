@@ -9,6 +9,8 @@
 #include <core/resource/resource_fwd.h>
 #include <nx/vms/client/desktop/window_context_aware.h>
 
+#include "playlist.h"
+
 class QnResourceWidget;
 
 namespace nx::vms::client::desktop {
@@ -17,8 +19,9 @@ namespace nx::vms::client::desktop {
  * QML-facing bridge that plays playlist entries in the workbench.
  *
  * Opening a media file is delegated to the regular "drop resources" action, so the whole existing
- * local file playback pipeline is reused. The player keeps a flat, folder-expanded list of files of
- * the current playlist to implement the previous/next navigation.
+ * local file playback pipeline is reused. Network stream entries (IPTV channels) are opened through
+ * the IPTV manager instead. The player keeps a flat, folder-expanded list of the entries of the
+ * current playlist to implement the previous/next navigation.
  */
 class PlaylistPlayer: public QObject, public WindowContextAware
 {
@@ -27,7 +30,7 @@ class PlaylistPlayer: public QObject, public WindowContextAware
 public:
     explicit PlaylistPlayer(WindowContext* context, QObject* parent = nullptr);
 
-    /** Plays the file(s) behind the given playlist entry row. */
+    /** Plays the file(s) or the stream behind the given playlist entry row. */
     Q_INVOKABLE void playEntry(const QString& playlistId, int row);
 
     Q_INVOKABLE void playNext();
@@ -42,8 +45,11 @@ public:
     static void registerQmlType();
 
 private:
-    void rebuildFiles();
-    void openCurrentFile();
+    /** Rebuilds the flat list of playable entries. */
+    void rebuildEntries();
+    /** Appends the given playlist entry, expanding folders into their media files. */
+    void appendExpanded(const PlaylistEntry& entry);
+    void openCurrentEntry();
 
     /**
      * Disables looping for the widget of the entry being played and makes it advance to the next
@@ -52,7 +58,7 @@ private:
     void hookWidget(QnResourceWidget* widget);
 
     QString m_playlistId;
-    QStringList m_files;
+    QList<PlaylistEntry> m_entries;
     int m_index = -1;
     QnResourcePtr m_currentResource;
 };

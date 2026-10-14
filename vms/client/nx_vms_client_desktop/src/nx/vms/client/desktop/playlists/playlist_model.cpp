@@ -10,6 +10,16 @@
 
 namespace nx::vms::client::desktop {
 
+namespace {
+
+/** Name of an entry as it is shown in the playlist: a title for streams, the file name otherwise. */
+QString displayName(const PlaylistEntry& entry)
+{
+    return entry.isStream() ? entry.title : QFileInfo(entry.path).fileName();
+}
+
+} // namespace
+
 PlaylistModel::PlaylistModel(QObject* parent):
     QAbstractListModel(parent)
 {
@@ -77,7 +87,7 @@ void PlaylistModel::rebuildFilteredRows()
     for (int row = 0; row < static_cast<int>(entries.size()); ++row)
     {
         if (m_filter.isEmpty()
-            || QFileInfo(entries.at(row).path).fileName().contains(m_filter, Qt::CaseInsensitive))
+            || displayName(entries.at(row)).contains(m_filter, Qt::CaseInsensitive))
         {
             m_filteredRows.append(row);
         }
@@ -117,7 +127,7 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
     switch (role)
     {
         case FileNameRole:
-            return QFileInfo(entry.path).fileName();
+            return displayName(entry);
 
         case FilePathRole:
             return entry.path;
@@ -125,8 +135,13 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
         case IsFolderRole:
             return entry.isFolder;
 
+        case IsStreamRole:
+            return entry.isStream();
+
         case DurationMsRole:
-            return entry.isFolder ? qint64(-1) : playlistManager->durationMs(entry.path);
+            return (entry.isFolder || entry.isStream())
+                ? qint64(-1)
+                : playlistManager->durationMs(entry.path);
 
         default:
             return {};
@@ -139,6 +154,7 @@ QHash<int, QByteArray> PlaylistModel::roleNames() const
         {FileNameRole, "fileName"},
         {FilePathRole, "filePath"},
         {IsFolderRole, "isFolder"},
+        {IsStreamRole, "isStream"},
         {DurationMsRole, "durationMs"},
     };
 }
