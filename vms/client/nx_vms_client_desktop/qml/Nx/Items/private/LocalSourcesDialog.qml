@@ -19,9 +19,9 @@ Dialog
     title: qsTr("Local Video Sources")
 
     width: 520
-    height: 600
+    height: 640
     minimumWidth: 520
-    minimumHeight: 600
+    minimumHeight: 640
 
     modality: Qt.ApplicationModal
 
@@ -213,6 +213,17 @@ Dialog
                     + " locally and never shown.")
                 : qsTr("If the camera requires authentication, fill in the username and password"
                     + " above (or embed them into the URL). They are stored locally and never shown.")
+            color: ColorTheme.transparent(ColorTheme.colors.light4, 0.6)
+            font.pixelSize: FontConfig.small.pixelSize
+            wrapMode: Text.WordWrap
+        }
+
+        Text
+        {
+            width: parent.width
+
+            text: qsTr("Supported: RTSP, RTMP, HTTP(S) including HLS (m3u8), and UDP multicast"
+                + " (udp://@239.1.1.1:1234).")
             color: ColorTheme.transparent(ColorTheme.colors.light4, 0.6)
             font.pixelSize: FontConfig.small.pixelSize
             wrapMode: Text.WordWrap

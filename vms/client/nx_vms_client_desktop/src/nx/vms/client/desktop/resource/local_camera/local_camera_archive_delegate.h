@@ -4,6 +4,8 @@
 
 #include <atomic>
 
+#include <QtCore/QList>
+#include <QtCore/QPair>
 #include <QtCore/QString>
 
 #include <nx/streaming/abstract_archive_delegate.h>
@@ -64,8 +66,17 @@ private:
     bool openStream();
     bool openCaptureDevice();
     bool openUrl();
+    /** Opens the stream with the given FFmpeg options, reporting the reason on failure. */
+    bool openUrlWithOptions(const QList<QPair<QString, QString>>& options, QString* errorOut);
+    /**
+     * The URL actually handed to FFmpeg: for UDP a missing '@' is added in front of a multicast
+     * address, which FFmpeg needs in order to receive it.
+     */
+    QString effectiveUrl() const;
     void closeStream();
-    QnAbstractMediaDataPtr takeVideoPacket();
+    QnAbstractMediaDataPtr takePacket();
+    QnAbstractMediaDataPtr makeVideoPacket();
+    QnAbstractMediaDataPtr makeAudioPacket();
     QString sourceDescription() const;
 
     struct Private;
