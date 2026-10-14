@@ -5,11 +5,16 @@
 #include <optional>
 
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QVariantList>
+#include <QtNetwork/QNetworkAccessManager>
 
 #include <nx/utils/uuid.h>
 
 #include "iptv_playlist.h"
+
+class QNetworkReply;
+class QTimer;
 
 namespace nx::vms::client::desktop {
 
@@ -21,11 +26,16 @@ class LocalSettings;
  * A playlist is imported either from an http(s) URL or from a local .m3u file, then parsed and kept
  * in the local settings. Channels are not turned into resources up front: a resource is created only
  * when a channel is actually opened, so a playlist with thousands of entries stays cheap.
+ *
+ * Importing a remote playlist is asynchronous: `importing` turns true, the download runs in the
+ * background and `importFinished` is emitted when it is done. A playlist of tens of thousands of
+ * entries downloads in seconds, so the UI must stay responsive instead of blocking on the request.
  */
 class NX_VMS_CLIENT_DESKTOP_API IptvManager: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QVariantList playlists READ playlists NOTIFY playlistsChanged)
+    Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
 
 public:
     explicit IptvManager(LocalSettings* settings, QObject* parent = nullptr);
@@ -34,12 +44,15 @@ public:
     /** Imported playlists as a list of { id, name, source, channelCount } maps. */
     QVariantList playlists() const;
 
+    /** True while a remote playlist is being downloaded. */
+    bool importing() const;
+
     /** Channels of a playlist as a list of { id, name, group, logo } maps. */
     Q_INVOKABLE QVariantList channels(const QString& playlistId) const;
 
     /**
-     * Imports a playlist from an http(s) URL. The download is performed on the calling thread, so
-     * this is meant for an explicit user action.
+     * Starts importing a playlist from an http(s) URL. Returns false if the request could not be
+     * started; the download itself is asynchronous and reports through importFinished().
      */
     Q_INVOKABLE bool importFromUrl(const QString& url, const QString& name);
 
@@ -60,16 +73,32 @@ public:
 
 signals:
     void playlistsChanged();
+    void importingChanged();
+    /** Emitted once an import completes; lastError() is set when it failed. */
+    void importFinished(bool ok);
 
 private:
-    bool importSource(const QString& source, const QString& name, const nx::Uuid& replaceId);
-    bool readSource(const QString& source, QByteArray* data) const;
+    bool startImport(const QString& source, const QString& name, const nx::Uuid& replaceId);
+    /** Parses, stores and reports a downloaded/read playlist. Returns false on a parse failure. */
+    bool finishImport(const QByteArray& data);
+    void onDownloadFinished();
+    void onImportTimeout();
+    void setImporting(bool value);
     /** Returns a copy: the settings property hands out its value by value. */
     std::optional<IptvPlaylist> findPlaylist(const nx::Uuid& id) const;
     bool storePlaylist(IptvPlaylist playlist);
 
     LocalSettings* const m_settings;
     QString m_lastError;
+
+    QNetworkAccessManager m_network;
+    QPointer<QNetworkReply> m_pendingReply;
+    QTimer* m_timeout = nullptr;
+
+    QString m_pendingSource;
+    QString m_pendingName;
+    nx::Uuid m_pendingReplaceId;
+    bool m_importing = false;
 };
 
 } // namespace nx::vms::client::desktop

@@ -2,12 +2,10 @@
 
 #include "iptv_manager.h"
 
-#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantMap>
-#include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 
@@ -32,6 +30,12 @@ namespace {
 
 constexpr int kDownloadTimeoutMs = 20000;
 
+bool isRemoteSource(const QString& source)
+{
+    return source.startsWith("http://", Qt::CaseInsensitive)
+        || source.startsWith("https://", Qt::CaseInsensitive);
+}
+
 } // namespace
 
 IptvManager::IptvManager(LocalSettings* settings, QObject* parent):
@@ -48,6 +52,11 @@ IptvManager::IptvManager(LocalSettings* settings, QObject* parent):
 }
 
 IptvManager::~IptvManager() = default;
+
+bool IptvManager::importing() const
+{
+    return m_importing;
+}
 
 QVariantList IptvManager::playlists() const
 {
@@ -93,12 +102,12 @@ QString IptvManager::lastError() const
 
 bool IptvManager::importFromUrl(const QString& url, const QString& name)
 {
-    return importSource(url.trimmed(), name, nx::Uuid());
+    return startImport(url.trimmed(), name, nx::Uuid());
 }
 
 bool IptvManager::importFromFile(const QString& path, const QString& name)
 {
-    return importSource(path.trimmed(), name, nx::Uuid());
+    return startImport(path.trimmed(), name, nx::Uuid());
 }
 
 bool IptvManager::reloadPlaylist(const QString& id)
@@ -107,7 +116,7 @@ bool IptvManager::reloadPlaylist(const QString& id)
     if (!playlist)
         return false;
 
-    return importSource(playlist->source, playlist->name, playlist->id);
+    return startImport(playlist->source, playlist->name, playlist->id);
 }
 
 bool IptvManager::removePlaylist(const QString& id)
@@ -184,7 +193,7 @@ bool IptvManager::openChannel(const QString& playlistId, const QString& channelI
     return true;
 }
 
-bool IptvManager::importSource(
+bool IptvManager::startImport(
     const QString& source, const QString& name, const nx::Uuid& replaceId)
 {
     if (!m_settings)
@@ -198,67 +207,117 @@ bool IptvManager::importSource(
         return false;
     }
 
-    QByteArray data;
-    if (!readSource(source, &data))
+    if (m_importing)
     {
-        m_lastError = tr("Failed to read the playlist from '%1'.").arg(source);
+        m_lastError = tr("Another playlist is already being imported.");
         return false;
     }
 
+    m_pendingSource = source;
+    m_pendingName = name;
+    m_pendingReplaceId = replaceId;
+
+    if (!isRemoteSource(source))
+    {
+        // A local file is cheap to read, so it is handled inline.
+        QFile file(source);
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            m_lastError = tr("Failed to read the playlist from '%1'.").arg(source);
+            return false;
+        }
+
+        setImporting(true);
+        const bool ok = finishImport(file.readAll());
+        setImporting(false);
+        return ok;
+    }
+
+    setImporting(true);
+    m_pendingReply = m_network.get(QNetworkRequest(QUrl(source)));
+    connect(m_pendingReply, &QNetworkReply::finished, this, &IptvManager::onDownloadFinished);
+
+    if (!m_timeout)
+    {
+        m_timeout = new QTimer(this);
+        m_timeout->setSingleShot(true);
+        connect(m_timeout, &QTimer::timeout, this, &IptvManager::onImportTimeout);
+    }
+    m_timeout->start(kDownloadTimeoutMs);
+
+    return true;
+}
+
+bool IptvManager::finishImport(const QByteArray& data)
+{
     QString parseError;
     const QList<IptvChannel> channels = parseM3uPlaylist(data, &parseError);
     if (channels.isEmpty())
     {
         m_lastError = parseError.isEmpty() ? tr("The playlist contains no channels.") : parseError;
+        NX_WARNING(this, "Failed to import playlist '%1': %2", m_pendingSource, m_lastError);
+        emit importFinished(false);
         return false;
     }
 
     IptvPlaylist playlist;
-    playlist.id = replaceId.isNull() ? nx::Uuid::createUuid() : replaceId;
-    playlist.name = name.trimmed().isEmpty() ? source : name.trimmed();
-    playlist.source = source;
+    playlist.id = m_pendingReplaceId.isNull() ? nx::Uuid::createUuid() : m_pendingReplaceId;
+    playlist.name = m_pendingName.trimmed().isEmpty()
+        ? m_pendingSource
+        : m_pendingName.trimmed();
+    playlist.source = m_pendingSource;
     playlist.channels = channels;
 
     NX_INFO(typeid(IptvManager), "Imported playlist '%1' from '%2': %3 channel(s)",
-        playlist.name, source, channels.size());
+        playlist.name, m_pendingSource, channels.size());
 
-    return storePlaylist(playlist);
+    storePlaylist(playlist);
+    emit importFinished(true);
+    return true;
 }
 
-bool IptvManager::readSource(const QString& source, QByteArray* data) const
+void IptvManager::onDownloadFinished()
 {
-    const bool isRemote = source.startsWith("http://", Qt::CaseInsensitive)
-        || source.startsWith("https://", Qt::CaseInsensitive);
+    if (m_timeout)
+        m_timeout->stop();
 
-    if (!isRemote)
+    QNetworkReply* reply = m_pendingReply;
+    m_pendingReply = nullptr;
+    if (!reply)
+        return;
+
+    const QNetworkReply::NetworkError error = reply->error();
+    const QString errorString = reply->errorString();
+    const QByteArray data = (error == QNetworkReply::NoError) ? reply->readAll() : QByteArray();
+    reply->deleteLater();
+
+    if (error != QNetworkReply::NoError)
     {
-        QFile file(source);
-        if (!file.open(QIODevice::ReadOnly))
-            return false;
-
-        *data = file.readAll();
-        return true;
+        m_lastError = tr("Failed to read the playlist from '%1' (%2).")
+            .arg(m_pendingSource, errorString);
+        NX_WARNING(this, "Failed to download playlist '%1': %2", m_pendingSource, m_lastError);
+        setImporting(false);
+        emit importFinished(false);
+        return;
     }
 
-    // The playlist is small and the download is an explicit user action, so a simple blocking
-    // request is used instead of wiring up an asynchronous state machine.
-    QNetworkAccessManager manager;
-    QNetworkReply* reply = manager.get(QNetworkRequest(QUrl(source)));
+    finishImport(data);
+    setImporting(false);
+}
 
-    QEventLoop loop;
-    QTimer timeout;
-    timeout.setSingleShot(true);
-    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    timeout.start(kDownloadTimeoutMs);
-    loop.exec();
+void IptvManager::onImportTimeout()
+{
+    if (m_pendingReply)
+        m_pendingReply->abort(); //< Emits finished() and lands in onDownloadFinished().
+}
 
-    const bool succeeded = reply->isFinished() && reply->error() == QNetworkReply::NoError;
-    if (succeeded)
-        *data = reply->readAll();
+void IptvManager::setImporting(bool value)
+{
+    if (m_importing == value)
+        return;
 
-    reply->deleteLater();
-    return succeeded;
+    m_importing = value;
+    emit importingChanged();
 }
 
 std::optional<IptvPlaylist> IptvManager::findPlaylist(const nx::Uuid& id) const

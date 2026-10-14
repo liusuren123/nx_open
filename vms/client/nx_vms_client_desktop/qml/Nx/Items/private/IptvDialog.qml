@@ -50,21 +50,17 @@ Dialog
         if (source.length === 0)
             return
 
+        errorText.text = ""
+
         const isRemote = source.toLowerCase().indexOf("http://") === 0
             || source.toLowerCase().indexOf("https://") === 0
-        const ok = isRemote
+        // A remote playlist is downloaded in the background; the result arrives via importFinished.
+        const started = isRemote
             ? IptvManager.importFromUrl(source, nameField.text)
             : IptvManager.importFromFile(source, nameField.text)
 
-        if (!ok)
-        {
+        if (!started)
             errorText.text = IptvManager.lastError()
-            return
-        }
-
-        errorText.text = ""
-        sourceField.text = ""
-        nameField.text = ""
     }
 
     contentItem: Column
@@ -111,9 +107,20 @@ Dialog
 
                 isAccentButton: true
                 text: qsTr("Import")
-                enabled: sourceField.text.length > 0
+                enabled: sourceField.text.length > 0 && !IptvManager.importing
                 onClicked: control.importPlaylist()
             }
+        }
+
+        Text
+        {
+            id: statusText
+
+            width: parent.width
+            visible: IptvManager.importing
+            text: qsTr("Importing\u2026")
+            color: ColorTheme.colors.light4
+            font.pixelSize: FontConfig.small.pixelSize
         }
 
         Text
@@ -277,6 +284,25 @@ Dialog
     {
         buttonLayout: DialogButtonBox.KdeLayout
         standardButtons: DialogButtonBox.Close
+    }
+
+    Connections
+    {
+        target: IptvManager
+
+        function onImportFinished(ok)
+        {
+            if (ok)
+            {
+                errorText.text = ""
+                sourceField.text = ""
+                nameField.text = ""
+            }
+            else
+            {
+                errorText.text = IptvManager.lastError()
+            }
+        }
     }
 
     function selectPlaylist(id)
