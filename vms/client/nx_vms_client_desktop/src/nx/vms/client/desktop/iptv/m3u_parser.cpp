@@ -63,6 +63,19 @@ bool isHlsPlaylist(const QString& text)
     return pattern.match(text).hasMatch();
 }
 
+/**
+ * Whether the data looks like an M3U playlist of channels at all. Arbitrary content (a media file,
+ * an HTML page, ...) must not be parsed as a channel list: every one of its lines would otherwise
+ * become a bogus entry, so a single video would be added as hundreds of "channels".
+ */
+bool looksLikeM3uPlaylist(const QString& text)
+{
+    static const QRegularExpression pattern(
+        QStringLiteral(R"re(^[ \t]*#EXT(?:M3U|INF))re"),
+        QRegularExpression::MultilineOption | QRegularExpression::CaseInsensitiveOption);
+    return pattern.match(text).hasMatch();
+}
+
 } // namespace
 
 QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, const QString& baseUrl, QString* error)
@@ -80,6 +93,15 @@ QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, const QString& baseU
             *error = "The file is an HLS playlist, not a list of channels.";
 
         NX_DEBUG(typeid(parseM3uPlaylist), "HLS playlist detected, no channels parsed");
+        return {};
+    }
+
+    if (!looksLikeM3uPlaylist(text))
+    {
+        if (error)
+            *error = "The data is not an M3U playlist.";
+
+        NX_DEBUG(typeid(parseM3uPlaylist), "Not an M3U playlist, no channels parsed");
         return {};
     }
 
