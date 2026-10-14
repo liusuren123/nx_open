@@ -31,10 +31,22 @@ private:
     void at_addMediaFolderButton_clicked();
     void at_removeMediaFolderButton_clicked();
     void at_mediaFoldersList_selectionChanged();
+    void at_browseStreamCacheFolderButton_clicked();
+    void at_clearStreamCacheButton_clicked();
 
 private:
     QStringList mediaFolders() const;
     void setMediaFolders(const QStringList& value);
+
+    /** Cache folder shown in the UI; empty means the default one is used. */
+    QString streamCacheFolder() const;
+    void setStreamCacheFolder(const QString& value);
+
+    qint64 streamCacheLimitBytes() const;
+    void setStreamCacheLimitBytes(qint64 value);
+
+    /** Shows how much of the cache limit is used up. */
+    void updateStreamCacheUsage();
 
     quint64 userIdleTimeoutMs() const;
     void setUserIdleTimeoutMs(quint64 value);

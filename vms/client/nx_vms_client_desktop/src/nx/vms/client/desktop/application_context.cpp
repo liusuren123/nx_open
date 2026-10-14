@@ -69,6 +69,7 @@
 #include <nx/vms/client/desktop/iptv/iptv_manager.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/resource/local_camera/local_camera_manager.h>
+#include <nx/vms/client/desktop/resource/local_camera/stream_cache.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
 #include <nx/vms/client/desktop/resource/screen_recording/audio_video_win/audio_video_input.h>
 #include <nx/vms/client/desktop/settings/ipc_settings_synchronizer.h>
@@ -378,6 +379,7 @@ struct ApplicationContext::Private
     std::unique_ptr<PlaylistManager> playlistManager;
     std::unique_ptr<LocalCameraManager> localCameraManager;
     std::unique_ptr<IptvManager> iptvManager;
+    std::unique_ptr<StreamCache> streamCache;
     std::unique_ptr<WebPageDataCache> webPageDataCache;
     std::unique_ptr<QnQtbugWorkaround> qtBugWorkarounds;
     std::unique_ptr<core::DesktopResourceSearcher> desktopResourceSearcher;
@@ -807,6 +809,7 @@ ApplicationContext::ApplicationContext(
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
             d->localCameraManager = std::make_unique<LocalCameraManager>(d->localSettings.get());
             d->iptvManager = std::make_unique<IptvManager>(d->localSettings.get());
+            d->streamCache = std::make_unique<StreamCache>(d->localSettings.get());
             d->webPageDataCache = std::make_unique<WebPageDataCache>();
             d->qtBugWorkarounds = std::make_unique<QnQtbugWorkaround>();
             if (!startupParameters.localMode)
@@ -846,6 +849,7 @@ ApplicationContext::~ApplicationContext()
     d->localCameraResourceSearcher.reset();
     d->localCameraManager.reset();
     d->iptvManager.reset();
+    d->streamCache.reset();
 
     // Local resources context temporary implementation depends on main system context.
     d->localResourcesContext.reset();
@@ -1058,6 +1062,11 @@ LocalCameraManager* ApplicationContext::localCameraManager() const
 IptvManager* ApplicationContext::iptvManager() const
 {
     return d->iptvManager.get();
+}
+
+StreamCache* ApplicationContext::streamCache() const
+{
+    return d->streamCache.get();
 }
 
 WebPageDataCache* ApplicationContext::webPageDataCache() const

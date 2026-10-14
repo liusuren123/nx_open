@@ -79,6 +79,13 @@ private:
     void detectFilePlayback();
     bool openCaptureDevice();
     bool openUrl();
+    /** Reads the stream layout of the currently opened input. */
+    bool readStreamInfo();
+    /**
+     * Replaces the input of a finite file with the stream cache, so that seeking and replaying it do
+     * not download it again. Returns false when the source must keep being read directly.
+     */
+    bool switchToCachedInput();
     /** Opens the stream with the given FFmpeg options, reporting the reason on failure. */
     bool openUrlWithOptions(const QList<QPair<QString, QString>>& options, QString* errorOut);
     /**

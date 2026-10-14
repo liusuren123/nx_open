@@ -1,0 +1,803 @@
+// Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/
+
+#include "stream_cache.h"
+
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QHash>
+#include <QtCore/QStandardPaths>
+
+extern "C" {
+#include <libavformat/avio.h>
+#include <libavutil/dict.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
+}
+
+#include <nx/utils/file_system.h>
+#include <nx/utils/log/log.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
+
+#include "local_camera_source.h"
+
+namespace nx::vms::client::desktop {
+
+namespace {
+
+/** The cached data is stored, and downloaded from the network, one block at a time. */
+constexpr int kBlockSize = 1024 * 1024;
+
+/** How many blocks ahead of the playhead are downloaded in the background. */
+constexpr int kReadAheadBlocks = 8;
+
+/** Size of the buffer FFmpeg reads the resource through. */
+constexpr int kAvioBufferSize = 64 * 1024;
+
+constexpr int kDefaultLimitGigabytes = 50;
+
+/** Fraction of the index file header that records the resource size. */
+constexpr int kIndexHeaderSize = sizeof(qint64);
+
+QByteArray encodedSize(qint64 size)
+{
+    // A fixed layout keeps the header comparable across runs and platforms.
+    QByteArray result(kIndexHeaderSize, '\0');
+    for (int i = 0; i < kIndexHeaderSize; ++i)
+        result[i] = char((quint64(size) >> (8 * i)) & 0xff);
+
+    return result;
+}
+
+QString defaultFolder()
+{
+    const QStringList locations =
+        QStandardPaths::standardLocations(QStandardPaths::AppLocalDataLocation);
+    if (locations.isEmpty())
+        return {};
+
+    return QDir(locations.first()).absoluteFilePath("stream_cache");
+}
+
+qint64 folderSizeBytes(const QString& path)
+{
+    const QDir folder(path);
+    if (!folder.exists())
+        return 0;
+
+    qint64 result = 0;
+    for (const QFileInfo& file: folder.entryInfoList(QDir::Files))
+        result += file.size();
+
+    return result;
+}
+
+int interruptCallback(void* opaque)
+{
+    return static_cast<std::atomic<bool>*>(opaque)->load() ? 1 : 0;
+}
+
+} // namespace
+
+/**
+ * On-disk cache of a single resource. Every reader of the same URL shares one storage, so two
+ * layouts showing the same stream download it once.
+ *
+ * The data file holds the resource verbatim; which of its blocks have been downloaded is recorded
+ * in a separate index file, so a partially cached resource survives a restart and is never
+ * downloaded twice.
+ */
+class StreamCacheStorage
+{
+public:
+    StreamCacheStorage(const QString& dataPath, const QString& indexPath, qint64 sizeBytes);
+    ~StreamCacheStorage();
+
+    bool isValid() const { return m_valid; }
+    qint64 size() const { return m_size; }
+    int blockCount() const { return m_blockCount; }
+
+    /** Number of bytes of block #index; the last block may be shorter than the others. */
+    int blockSize(int index) const;
+
+    bool hasBlock(int index) const;
+    bool tryReadBlock(int index, QByteArray* data) const;
+    void writeBlock(int index, const QByteArray& data);
+
+    /**
+     * Removes the cached files as soon as this storage is released. The files of a resource that is
+     * being played are open, and Windows does not remove an open file, so the removal is deferred
+     * until playback of it stops.
+     */
+    void removeOnRelease();
+
+private:
+    bool isPresent(int index) const;
+
+    const QString m_dataPath;
+    const QString m_indexPath;
+
+    mutable QFile m_data;
+    mutable QFile m_index;
+
+    const qint64 m_size = 0;
+    const int m_blockCount = 0;
+    bool m_valid = false;
+    std::atomic<bool> m_removeOnRelease{false};
+
+    mutable std::mutex m_mutex;
+};
+
+StreamCacheStorage::StreamCacheStorage(
+    const QString& dataPath, const QString& indexPath, qint64 sizeBytes):
+    m_dataPath(dataPath),
+    m_indexPath(indexPath),
+    m_data(dataPath),
+    m_index(indexPath),
+    m_size(sizeBytes),
+    m_blockCount(qMax(1, int((sizeBytes + kBlockSize - 1) / kBlockSize)))
+{
+    const QByteArray header = encodedSize(sizeBytes);
+
+    // Reuse the cached data only when it was made from exactly this resource; otherwise the stale
+    // file would be served for a URL whose content changed.
+    bool reuse = false;
+    QFile index(indexPath);
+    if (QFileInfo(dataPath).size() > 0 && index.open(QIODevice::ReadOnly))
+    {
+        reuse = index.read(kIndexHeaderSize) == header
+            && index.size() == kIndexHeaderSize + qint64(m_blockCount);
+        index.close();
+    }
+
+    if (!reuse)
+    {
+        QFile::remove(dataPath);
+        QFile::remove(indexPath);
+    }
+
+    if (!nx::utils::file_system::ensureDir(QFileInfo(dataPath).absoluteDir()))
+        return;
+
+    m_valid = m_data.open(QIODevice::ReadWrite) && m_index.open(QIODevice::ReadWrite);
+    if (!m_valid)
+    {
+        NX_WARNING(typeid(StreamCache), "Failed to open the stream cache file '%1'.",
+            dataPath);
+        return;
+    }
+
+    if (reuse)
+        return;
+
+    // The data file is deliberately not preallocated: only the downloaded blocks take up space.
+    m_index.write(header);
+    m_index.write(QByteArray(m_blockCount, '\0'));
+    m_index.flush();
+}
+
+StreamCacheStorage::~StreamCacheStorage()
+{
+    if (!m_removeOnRelease.load())
+        return;
+
+    // The files must be closed before they can be removed, and the members are still alive here.
+    m_data.close();
+    m_index.close();
+    QFile::remove(m_dataPath);
+    QFile::remove(m_indexPath);
+}
+
+void StreamCacheStorage::removeOnRelease()
+{
+    m_removeOnRelease.store(true);
+}
+
+int StreamCacheStorage::blockSize(int index) const
+{
+    const qint64 start = qint64(index) * kBlockSize;
+    return int(qBound<qint64>(qint64(0), m_size - start, qint64(kBlockSize)));
+}
+
+bool StreamCacheStorage::isPresent(int index) const
+{
+    if (!m_index.seek(kIndexHeaderSize + index))
+        return false;
+
+    const QByteArray value = m_index.read(1);
+    return value.size() == 1 && value.at(0) != 0;
+}
+
+bool StreamCacheStorage::hasBlock(int index) const
+{
+    if (!m_valid || index < 0 || index >= m_blockCount)
+        return false;
+
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    return isPresent(index);
+}
+
+bool StreamCacheStorage::tryReadBlock(int index, QByteArray* data) const
+{
+    if (!m_valid || !data || index < 0 || index >= m_blockCount)
+        return false;
+
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    if (!isPresent(index))
+        return false;
+
+    const int size = blockSize(index);
+    if (!m_data.seek(qint64(index) * kBlockSize))
+        return false;
+
+    data->resize(size);
+    return m_data.read(data->data(), size) == size;
+}
+
+void StreamCacheStorage::writeBlock(int index, const QByteArray& data)
+{
+    if (!m_valid || index < 0 || index >= m_blockCount || data.isEmpty())
+        return;
+
+    const std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (!m_data.seek(qint64(index) * kBlockSize) || m_data.write(data) != data.size())
+    {
+        NX_WARNING(typeid(StreamCache), "Failed to write %1 bytes to the stream cache file '%2'.",
+            data.size(), m_dataPath);
+        return;
+    }
+
+    // Marking the block present last keeps a partial write from being served as valid data.
+    if (!m_index.seek(kIndexHeaderSize + index) || m_index.write("\1", 1) != 1)
+    {
+        NX_WARNING(typeid(StreamCache), "Failed to update the stream cache index '%1'.",
+            m_indexPath);
+    }
+}
+
+struct StreamCacheReader::Private
+{
+    Private(const QString& url, const std::shared_ptr<StreamCacheStorage>& storage);
+
+    const QString url;
+    const std::shared_ptr<StreamCacheStorage> storage;
+
+    /** Cancellation of the pending network operations, including the ones in the worker. */
+    AVIOInterruptCB interrupt{};
+    std::atomic<bool> stopRequested{false};
+
+    /** Network source the missing blocks are downloaded from; opened on demand. */
+    std::mutex sourceMutex;
+    AVIOContext* source = nullptr;
+
+    /** Read ahead state, guarded by workerMutex. */
+    std::thread worker;
+    std::mutex workerMutex;
+    std::condition_variable workerCondition;
+    int prefetchFrom = -1;
+    bool stopping = false;
+
+    /** FFmpeg input. The reader owns both the context and its buffer. */
+    AVIOContext* avio = nullptr;
+    unsigned char* avioBuffer = nullptr;
+
+    /** Position the read callback serves the next byte from. */
+    qint64 position = 0;
+    QByteArray blockBuffer;
+
+    int read(unsigned char* buffer, int bufferSize);
+    int64_t seek(int64_t offset, int whence);
+    bool ensureBlock(int index);
+    bool fetchBlock(int index);
+    bool openSource();
+    void closeSource();
+    bool openAvio();
+    void startWorker();
+    void stopWorker();
+    void prefetchLoop();
+    void updatePrefetch(int block);
+};
+
+StreamCacheReader::Private::Private(
+    const QString& url, const std::shared_ptr<StreamCacheStorage>& storage):
+    url(url),
+    storage(storage)
+{
+    interrupt.callback = &interruptCallback;
+    interrupt.opaque = &stopRequested;
+}
+
+int StreamCacheReader::Private::read(unsigned char* buffer, int bufferSize)
+{
+    if (stopRequested.load())
+        return AVERROR_EXIT;
+
+    const qint64 total = storage->size();
+    int done = 0;
+    const char* reason = "end of resource";
+
+    while (done < bufferSize)
+    {
+        const qint64 current = position + done;
+        if (current >= total)
+            break;
+
+        const int index = int(current / kBlockSize);
+        if (!ensureBlock(index))
+        {
+            reason = "block unavailable";
+            break;
+        }
+
+        if (!storage->tryReadBlock(index, &blockBuffer))
+        {
+            reason = "block unreadable";
+            break;
+        }
+
+        const int offsetInBlock = int(current % kBlockSize);
+        if (offsetInBlock >= blockBuffer.size())
+        {
+            reason = "short block";
+            break;
+        }
+
+        const int chunk = qMin(bufferSize - done, blockBuffer.size() - offsetInBlock);
+        memcpy(buffer + done, blockBuffer.constData() + offsetInBlock, chunk);
+        done += chunk;
+    }
+
+    position += done;
+
+    if (done > 0)
+        updatePrefetch(int(position / kBlockSize));
+
+    if (done > 0)
+        return done;
+
+    NX_DEBUG(typeid(StreamCacheReader), "No data at %1 of %2 bytes of '%3': %4",
+        position, total, localCameraSourceUrlForDisplay(url), reason);
+
+    return stopRequested.load() ? AVERROR_EXIT : AVERROR_EOF;
+}
+
+int64_t StreamCacheReader::Private::seek(int64_t offset, int whence)
+{
+    if (whence == AVSEEK_SIZE)
+        return storage->size();
+
+    if (stopRequested.load())
+        return AVERROR_EXIT;
+
+    whence &= ~AVSEEK_FORCE;
+
+    qint64 target = 0;
+    switch (whence)
+    {
+        case SEEK_SET:
+            target = offset;
+            break;
+
+        case SEEK_CUR:
+            target = position + offset;
+            break;
+
+        case SEEK_END:
+            target = storage->size() + offset;
+            break;
+
+        default:
+            return AVERROR(EINVAL);
+    }
+
+    if (target < 0)
+        return AVERROR(EINVAL);
+
+    position = target;
+    updatePrefetch(int(target / kBlockSize));
+
+    return target;
+}
+
+bool StreamCacheReader::Private::ensureBlock(int index)
+{
+    if (index < 0 || index >= storage->blockCount())
+        return false;
+
+    if (storage->hasBlock(index))
+        return true;
+
+    return fetchBlock(index);
+}
+
+bool StreamCacheReader::Private::fetchBlock(int index)
+{
+    // Downloads are serialized: the source is a single connection that is seeked around.
+    const std::lock_guard<std::mutex> lock(sourceMutex);
+
+    // The worker may have downloaded it while this thread waited for the lock.
+    if (storage->hasBlock(index))
+        return true;
+
+    const qint64 offset = qint64(index) * kBlockSize;
+    const int expected = storage->blockSize(index);
+
+    QByteArray data;
+
+    // The connection is reused when possible and reopened once on failure: a server that drops an
+    // idle connection must not break playback.
+    for (int attempt = 0; attempt < 2 && !stopRequested.load(); ++attempt)
+    {
+        if (!openSource())
+            return false;
+
+        if (avio_seek(source, offset, SEEK_SET) < 0)
+        {
+            closeSource();
+            continue;
+        }
+
+        data.resize(expected);
+        int total = 0;
+        while (total < expected && !stopRequested.load())
+        {
+            const int read = avio_read(source,
+                reinterpret_cast<unsigned char*>(data.data()) + total, expected - total);
+            if (read <= 0)
+                break;
+
+            total += read;
+        }
+
+        if (total == expected)
+            break;
+
+        data.clear();
+        closeSource();
+    }
+
+    if (data.size() != expected)
+    {
+        if (!stopRequested.load())
+        {
+            NX_DEBUG(typeid(StreamCacheReader), "Failed to download %1 bytes at offset %2 of '%3'.",
+                expected, offset, localCameraSourceUrlForDisplay(url));
+        }
+
+        return false;
+    }
+
+    storage->writeBlock(index, data);
+    return true;
+}
+
+bool StreamCacheReader::Private::openSource()
+{
+    if (source)
+        return true;
+
+    AVDictionary* options = nullptr;
+    av_dict_set(&options, "rw_timeout", "15000000", 0);
+    av_dict_set(&options, "reconnect", "1", 0);
+    av_dict_set(&options, "reconnect_streamed", "1", 0);
+    av_dict_set(&options, "reconnect_delay_max", "4", 0);
+    av_dict_set(&options, "user_agent", "NxMetaClient", 0);
+
+    const int result = avio_open2(
+        &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
+    av_dict_free(&options);
+
+    if (result < 0)
+    {
+        source = nullptr;
+        NX_DEBUG(typeid(StreamCacheReader), "Failed to open '%1' for caching: %2",
+            localCameraSourceUrlForDisplay(url), result);
+        return false;
+    }
+
+    return true;
+}
+
+void StreamCacheReader::Private::closeSource()
+{
+    if (source)
+        avio_closep(&source);
+
+    source = nullptr;
+}
+
+bool StreamCacheReader::Private::openAvio()
+{
+    avioBuffer = static_cast<unsigned char*>(av_malloc(kAvioBufferSize));
+    if (!avioBuffer)
+        return false;
+
+    avio = avio_alloc_context(avioBuffer, kAvioBufferSize, /*write_flag*/ 0, this,
+        &StreamCacheReader::readCallback, /*write_packet*/ nullptr,
+        &StreamCacheReader::seekCallback);
+    if (!avio)
+    {
+        av_free(avioBuffer);
+        avioBuffer = nullptr;
+        return false;
+    }
+
+    // The cached resource is always randomly accessible; this is what makes seeking work.
+    avio->seekable = AVIO_SEEKABLE_NORMAL;
+    return true;
+}
+
+void StreamCacheReader::Private::startWorker()
+{
+    worker = std::thread([this] { prefetchLoop(); });
+}
+
+void StreamCacheReader::Private::stopWorker()
+{
+    {
+        const std::lock_guard<std::mutex> lock(workerMutex);
+        stopping = true;
+    }
+
+    workerCondition.notify_all();
+    if (worker.joinable())
+        worker.join();
+}
+
+void StreamCacheReader::Private::updatePrefetch(int block)
+{
+    if (block < 0)
+        return;
+
+    {
+        const std::lock_guard<std::mutex> lock(workerMutex);
+        if (prefetchFrom == block + 1)
+            return;
+
+        prefetchFrom = block + 1;
+    }
+
+    workerCondition.notify_all();
+}
+
+void StreamCacheReader::Private::prefetchLoop()
+{
+    std::unique_lock<std::mutex> lock(workerMutex);
+
+    for (;;)
+    {
+        workerCondition.wait(lock, [this]
+            {
+                return stopping || stopRequested.load() || prefetchFrom >= 0;
+            });
+
+        if (stopping || stopRequested.load())
+            return;
+
+        const int from = prefetchFrom;
+        lock.unlock();
+
+        const int last = qMin(from + kReadAheadBlocks, storage->blockCount() - 1);
+        for (int index = from; index <= last; ++index)
+        {
+            if (stopRequested.load())
+                return;
+
+            if (!ensureBlock(index))
+                break;
+
+            // A reposition during the pass is picked up by the next iteration below.
+        }
+
+        lock.lock();
+        if (stopping || stopRequested.load())
+            return;
+
+        // Idle until the playhead moves again; the pass itself is not worth repeating.
+        if (prefetchFrom == from)
+            prefetchFrom = -1;
+    }
+}
+
+StreamCacheReader::StreamCacheReader(
+    const QString& url, const std::shared_ptr<StreamCacheStorage>& storage):
+    d(new Private(url, storage))
+{
+    if (d->openAvio())
+        d->startWorker();
+}
+
+StreamCacheReader::~StreamCacheReader()
+{
+    requestStop();
+    d->stopWorker();
+    d->closeSource();
+
+    // FFmpeg frees the buffer along with the context, so it must not be released here.
+    if (d->avio)
+        avio_context_free(&d->avio);
+}
+
+AVIOContext* StreamCacheReader::avioContext() const
+{
+    return d->avio;
+}
+
+qint64 StreamCacheReader::size() const
+{
+    return d->storage->size();
+}
+
+void StreamCacheReader::requestStop()
+{
+    d->stopRequested.store(true);
+    d->workerCondition.notify_all();
+}
+
+int StreamCacheReader::readCallback(void* opaque, unsigned char* buffer, int bufferSize)
+{
+    const auto d = static_cast<Private*>(opaque);
+    return d->read(buffer, bufferSize);
+}
+
+int64_t StreamCacheReader::seekCallback(void* opaque, int64_t offset, int whence)
+{
+    const auto d = static_cast<Private*>(opaque);
+    return d->seek(offset, whence);
+}
+
+struct StreamCache::Private
+{
+    explicit Private(LocalSettings* settings): settings(settings) {}
+
+    LocalSettings* const settings = nullptr;
+
+    /** One storage per cache file, shared by the readers of the same resource. */
+    std::mutex mutex;
+    QHash<QString, std::weak_ptr<StreamCacheStorage>> storages;
+};
+
+StreamCache::StreamCache(LocalSettings* settings, QObject* parent):
+    QObject(parent),
+    d(new Private(settings))
+{
+}
+
+StreamCache::~StreamCache() = default;
+
+QString StreamCache::defaultFolder()
+{
+    const QStringList locations =
+        QStandardPaths::standardLocations(QStandardPaths::AppLocalDataLocation);
+    if (locations.isEmpty())
+        return {};
+
+    return QDir(locations.first()).absoluteFilePath("stream_cache");
+}
+
+QString StreamCache::folder() const
+{
+    const QString configured = d->settings ? d->settings->streamCacheFolder() : QString();
+    return configured.isEmpty() ? defaultFolder() : configured;
+}
+
+qint64 StreamCache::limitBytes() const
+{
+    const qint64 configured = d->settings ? d->settings->streamCacheLimitBytes() : 0;
+    return configured > 0
+        ? configured
+        : qint64(kDefaultLimitGigabytes) * 1024 * 1024 * 1024;
+}
+
+qint64 StreamCache::usedBytes() const
+{
+    return folderSizeBytes(folder());
+}
+
+bool StreamCache::writable() const
+{
+    const QString path = folder();
+    if (path.isEmpty() || !nx::utils::file_system::ensureDir(QDir(path)))
+        return false;
+
+    return usedBytes() < limitBytes();
+}
+
+std::shared_ptr<StreamCacheReader> StreamCache::open(const QString& url, qint64 sizeBytes)
+{
+    if (url.isEmpty() || sizeBytes <= 0)
+        return nullptr;
+
+    if (!writable())
+    {
+        NX_DEBUG(typeid(StreamCache), "Not caching '%1': the cache is limited to %2 bytes.",
+            localCameraSourceUrlForDisplay(url), limitBytes());
+        return nullptr;
+    }
+
+    // The URL itself may carry credentials, so only its digest is used on disk.
+    const QString name = QString::fromLatin1(
+        QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex());
+    const QDir base(folder());
+    const QString dataPath = base.absoluteFilePath(name + ".stream");
+
+    std::shared_ptr<StreamCacheStorage> storage;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        storage = d->storages.value(dataPath).lock();
+        if (!storage)
+        {
+            storage = std::make_shared<StreamCacheStorage>(
+                dataPath, base.absoluteFilePath(name + ".index"), sizeBytes);
+            if (!storage->isValid())
+                return nullptr;
+
+            d->storages.insert(dataPath, storage);
+        }
+    }
+
+    if (storage->size() != sizeBytes)
+    {
+        NX_WARNING(typeid(StreamCache), "Cached size of '%1' changed from %2 to %3 bytes.",
+            localCameraSourceUrlForDisplay(url), storage->size(), sizeBytes);
+        return nullptr;
+    }
+
+    auto reader = std::shared_ptr<StreamCacheReader>(new StreamCacheReader(url, storage));
+    if (!reader->avioContext())
+        return nullptr;
+
+    NX_DEBUG(typeid(StreamCache), "Caching '%1' in '%2'.",
+        localCameraSourceUrlForDisplay(url), dataPath);
+
+    return reader;
+}
+
+void StreamCache::clear()
+{
+    std::vector<std::shared_ptr<StreamCacheStorage>> live;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        for (auto it = d->storages.cbegin(); it != d->storages.cend(); ++it)
+        {
+            if (const auto storage = it->lock())
+                live.push_back(storage);
+        }
+
+        d->storages.clear();
+    }
+
+    // The files of a resource that is being played are open and cannot be removed yet.
+    for (const auto& storage: live)
+        storage->removeOnRelease();
+
+    const QString path = folder();
+    if (path.isEmpty())
+        return;
+
+    const QDir folder(path);
+    for (const QFileInfo& file: folder.entryInfoList(QDir::Files))
+    {
+        if (!QFile::remove(file.absoluteFilePath()))
+        {
+            NX_DEBUG(typeid(StreamCache), "Cannot remove the cached file '%1' yet: it is in use.",
+                file.absoluteFilePath());
+        }
+    }
+
+    emit changed();
+}
+
+} // namespace nx::vms::client::desktop

@@ -6,6 +6,9 @@
 #include <QtCore/QDir>
 #include <QtCore/QStandardPaths>
 #include <QtMultimedia/QAudioDevice>
+#include <QtWidgets/QDialogButtonBox>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QSpinBox>
 
 #include <nx/build_info.h>
 #include <nx/vms/client/core/settings/client_core_settings.h>
@@ -13,6 +16,7 @@
 #include <nx/vms/client/desktop/application_context.h>
 #include <nx/vms/client/desktop/help/help_topic.h>
 #include <nx/vms/client/desktop/help/help_topic_accessor.h>
+#include <nx/vms/client/desktop/resource/local_camera/stream_cache.h>
 #include <nx/vms/client/desktop/settings/local_settings.h>
 #include <nx/vms/client/desktop/settings/screen_recording_settings.h>
 #include <nx/vms/utils/platform/autorun.h>
@@ -26,6 +30,23 @@ using namespace nx::vms::client::desktop;
 
 namespace {
 const int kMsecsPerMinute = 60 * 1000;
+const qint64 kBytesPerGigabyte = 1024 * 1024 * 1024;
+
+/** Readable byte size, e.g. "512 MB"; used to report how full the stream cache is. */
+QString formatByteSize(qint64 bytes)
+{
+    static const QStringList units{"B", "KB", "MB", "GB", "TB"};
+
+    double value = bytes;
+    int unit = 0;
+    while (value >= 1024.0 && unit < units.size() - 1)
+    {
+        value /= 1024.0;
+        ++unit;
+    }
+
+    return QString("%1 %2").arg(value, 0, 'f', unit == 0 ? 0 : 1).arg(units.at(unit));
+}
 }
 
 QnGeneralPreferencesWidget::QnGeneralPreferencesWidget(QWidget* parent):
@@ -53,6 +74,22 @@ QnGeneralPreferencesWidget::QnGeneralPreferencesWidget(QWidget* parent):
         &QnGeneralPreferencesWidget::at_removeMediaFolderButton_clicked);
     connect(ui->mediaFoldersList->selectionModel(), &QItemSelectionModel::selectionChanged,
         this, &QnGeneralPreferencesWidget::at_mediaFoldersList_selectionChanged);
+
+    connect(ui->browseStreamCacheFolderButton, &QPushButton::clicked, this,
+        &QnGeneralPreferencesWidget::at_browseStreamCacheFolderButton_clicked);
+    connect(ui->clearStreamCacheButton, &QPushButton::clicked, this,
+        &QnGeneralPreferencesWidget::at_clearStreamCacheButton_clicked);
+    connect(ui->streamCacheFolderEdit, &QLineEdit::textChanged, this,
+        &QnAbstractPreferencesWidget::hasChangesChanged);
+    connect(ui->streamCacheLimitSpinBox, QnSpinboxIntValueChanged, this,
+        &QnAbstractPreferencesWidget::hasChangesChanged);
+
+    // The cached data is only removed when the user asks for it, so the size is reported here.
+    if (StreamCache* const cache = appContext()->streamCache())
+    {
+        connect(cache, &StreamCache::changed, this,
+            &QnGeneralPreferencesWidget::updateStreamCacheUsage);
+    }
 
     connect(ui->pauseOnInactivityCheckBox, &QCheckBox::toggled, ui->idleTimeoutWidget,
         &QWidget::setEnabled);
@@ -119,6 +156,19 @@ void QnGeneralPreferencesWidget::applyChanges()
 
     appContext()->coreSettings()->muteOnAudioTransmit = muteOnAudioTransmit();
 
+    if (StreamCache* const cache = appContext()->streamCache())
+    {
+        LocalSettings* const settings = appContext()->localSettings();
+        const QString folder = streamCacheFolder();
+
+        // The default is not written down, so the setting keeps following it if it ever changes.
+        settings->streamCacheFolder =
+            (folder == StreamCache::defaultFolder()) ? QString() : folder;
+        settings->streamCacheLimitBytes = streamCacheLimitBytes();
+
+        updateStreamCacheUsage();
+    }
+
     if (recordingSettingsChanged)
         emit this->recordingSettingsChanged();
 }
@@ -126,6 +176,13 @@ void QnGeneralPreferencesWidget::applyChanges()
 void QnGeneralPreferencesWidget::loadDataToUi()
 {
     setMediaFolders(appContext()->localSettings()->mediaFolders());
+
+    if (StreamCache* const cache = appContext()->streamCache())
+    {
+        setStreamCacheFolder(cache->folder());
+        setStreamCacheLimitBytes(cache->limitBytes());
+        updateStreamCacheUsage();
+    }
     setUserIdleTimeoutMs(appContext()->localSettings()->userIdleTimeoutMs());
     setPrimaryAudioDeviceName(screenRecordingSettings()->primaryAudioDeviceName());
     setSecondaryAudioDeviceName(screenRecordingSettings()->secondaryAudioDeviceName());
@@ -149,6 +206,15 @@ bool QnGeneralPreferencesWidget::hasChanges() const
 
     if (appContext()->localSettings()->mediaFolders() != mediaFolders())
         return true;
+
+    if (StreamCache* const cache = appContext()->streamCache())
+    {
+        if (cache->folder() != streamCacheFolder())
+            return true;
+
+        if (cache->limitBytes() != streamCacheLimitBytes())
+            return true;
+    }
 
     bool oldPauseOnInactivity = (appContext()->localSettings()->userIdleTimeoutMs() > 0);
     bool newPauseOnInactivity = userIdleTimeoutMs() > 0;
@@ -235,6 +301,42 @@ void QnGeneralPreferencesWidget::at_mediaFoldersList_selectionChanged()
         !ui->mediaFoldersList->selectedItems().isEmpty());
 }
 
+void QnGeneralPreferencesWidget::at_browseStreamCacheFolderButton_clicked()
+{
+    const QString folder = QFileDialog::getExistingDirectory(this,
+        tr("Select Folder..."),
+        ui->streamCacheFolderEdit->text(),
+        QnCustomFileDialog::directoryDialogOptions());
+    if (folder.isEmpty())
+        return;
+
+    ui->streamCacheFolderEdit->setText(QDir::toNativeSeparators(folder));
+}
+
+void QnGeneralPreferencesWidget::at_clearStreamCacheButton_clicked()
+{
+    StreamCache* const cache = appContext()->streamCache();
+    if (!cache)
+        return;
+
+    const auto answer = QnMessageBox::question(this,
+        tr("Remove all the cached streamed files?"),
+        tr("The files are downloaded again the next time they are played."),
+        QDialogButtonBox::Yes | QDialogButtonBox::No,
+        QDialogButtonBox::No);
+    if (answer != QDialogButtonBox::Yes)
+        return;
+
+    cache->clear();
+    updateStreamCacheUsage();
+
+    if (cache->usedBytes() > 0)
+    {
+        QnMessageBox::information(this, tr("Some cached files are in use"),
+            tr("They are removed as soon as their playback stops."));
+    }
+}
+
 QStringList QnGeneralPreferencesWidget::mediaFolders() const
 {
     QStringList result;
@@ -248,6 +350,39 @@ void QnGeneralPreferencesWidget::setMediaFolders(const QStringList& value)
     ui->mediaFoldersList->clear();
     for (const auto &item : value)
         ui->mediaFoldersList->addItem(item);
+}
+
+QString QnGeneralPreferencesWidget::streamCacheFolder() const
+{
+    return ui->streamCacheFolderEdit->text().trimmed();
+}
+
+void QnGeneralPreferencesWidget::setStreamCacheFolder(const QString& value)
+{
+    ui->streamCacheFolderEdit->setText(value);
+}
+
+qint64 QnGeneralPreferencesWidget::streamCacheLimitBytes() const
+{
+    return qint64(ui->streamCacheLimitSpinBox->value()) * kBytesPerGigabyte;
+}
+
+void QnGeneralPreferencesWidget::setStreamCacheLimitBytes(qint64 value)
+{
+    const qint64 gigabytes = qBound<qint64>(
+        qint64(ui->streamCacheLimitSpinBox->minimum()), value / kBytesPerGigabyte,
+        qint64(ui->streamCacheLimitSpinBox->maximum()));
+    ui->streamCacheLimitSpinBox->setValue(int(gigabytes));
+}
+
+void QnGeneralPreferencesWidget::updateStreamCacheUsage()
+{
+    StreamCache* const cache = appContext()->streamCache();
+    if (!cache)
+        return;
+
+    ui->streamCacheUsageLabel->setText(tr("Used: %1 of %2")
+        .arg(formatByteSize(cache->usedBytes()), formatByteSize(cache->limitBytes())));
 }
 
 quint64 QnGeneralPreferencesWidget::userIdleTimeoutMs() const

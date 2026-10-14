@@ -38,6 +38,7 @@ class RunningInstancesManager;
 class ScreenRecordingSettings;
 class SharedMemoryManager;
 class ShowOnceSettings;
+class StreamCache;
 class MessageBarSettings;
 class SystemContext;
 class UploadManager;
@@ -223,6 +224,9 @@ public:
     LocalCameraManager* localCameraManager() const;
 
     IptvManager* iptvManager() const;
+
+    /** Disk cache of the streamed media files played back by the client. */
+    StreamCache* streamCache() const;
 
     QnForgottenSystemsManager* forgottenSystemsManager() const;
 

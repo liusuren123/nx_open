@@ -163,6 +163,11 @@ public:
     Property<QList<IptvPlaylist>> iptvPlaylists{this, "iptvPlaylists", {},
         "IPTV playlists imported by the user, kept locally."};
 
+    Property<QString> streamCacheFolder{this, "streamCacheFolder", {},
+        "Folder the streamed media files are cached in. Empty selects the default one."};
+    Property<qint64> streamCacheLimitBytes{this, "streamCacheLimitBytes", 0,
+        "Upper bound of the stream cache, in bytes. Zero selects the default one."};
+
     Property<bool> allowMtDecoding{this, "allowMtDecoding", true,
         "Disable MT decoding if false, enable auto selection if true."};
     Property<bool> forceMtDecoding{this, "forceMtDecoding", false,

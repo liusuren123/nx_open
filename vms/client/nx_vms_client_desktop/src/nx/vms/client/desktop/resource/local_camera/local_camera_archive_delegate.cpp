@@ -2,6 +2,8 @@
 
 #include "local_camera_archive_delegate.h"
 
+#include <memory>
+
 #include <QtCore/QDateTime>
 #include <QtCore/QStringList>
 
@@ -19,8 +21,10 @@ extern "C" {
 #include <nx/media/codec_parameters.h>
 #include <nx/media/video_data_packet.h>
 #include <nx/utils/log/log.h>
+#include <nx/vms/client/desktop/application_context.h>
 
 #include "local_camera_source.h"
+#include "stream_cache.h"
 
 namespace nx::vms::client::desktop {
 
@@ -52,6 +56,45 @@ bool isMulticastAddress(const QString& host)
     bool ok = false;
     const int firstOctet = octets.first().toInt(&ok);
     return ok && firstOctet >= 224 && firstOctet <= 239;
+}
+
+/**
+ * Options a progressive HTTP source is opened with. The same ones are used to probe whether the
+ * source is a file, so a live stream keeps the connection opened for the probe.
+ */
+QList<QPair<QString, QString>> httpOptions()
+{
+    return {
+        {"rw_timeout", "8000000"},
+        {"reconnect", "1"},
+        {"reconnect_streamed", "1"},
+        {"reconnect_delay_max", "4"},
+        {"user_agent", "NxMetaClient"}};
+}
+
+/**
+ * Whether the demuxer gets the media from the resource itself. A manifest-based demuxer (HLS, DASH,
+ * ...) reads a playlist and fetches the media on its own, so caching its input would store the
+ * playlist instead of the video, and a live playlist would stop being refreshed.
+ */
+bool readsResourceDirectly(const AVInputFormat* inputFormat)
+{
+    if (!inputFormat || !inputFormat->name)
+        return false;
+
+    static const QStringList manifestDemuxers{
+        QStringLiteral("hls"),
+        QStringLiteral("applehttp"),
+        QStringLiteral("dash"),
+        QStringLiteral("smoothstreaming")};
+
+    for (const QString& name: QString::fromLatin1(inputFormat->name).split(','))
+    {
+        if (manifestDemuxers.contains(name))
+            return false;
+    }
+
+    return true;
 }
 
 } // namespace
@@ -86,6 +129,12 @@ struct LocalCameraArchiveDelegate::Private
     /** File duration and the timestamp of its first frame, both in microseconds. */
     qint64 fileDurationUs = 0;
     qint64 fileBaseTimestampUs = 0;
+
+    /**
+     * Disk cache the file is read through. Null for a live stream and for a file whose cache is
+     * unavailable, both of which read the resource directly.
+     */
+    std::shared_ptr<StreamCacheReader> cacheReader;
 
     QString lastError;
 };
@@ -132,16 +181,16 @@ bool LocalCameraArchiveDelegate::openStream()
         return false;
     }
 
-    // Let av_read_frame() bail out once playback is stopped.
-    d->formatContext->interrupt_callback.callback =
-        &LocalCameraArchiveDelegate::interruptCallback;
-    d->formatContext->interrupt_callback.opaque = this;
-
-    if (avformat_find_stream_info(d->formatContext, nullptr) < 0)
-    {
-        d->lastError = tr("Failed to read stream information from '%1'.")
-            .arg(sourceDescription());
+    if (!readStreamInfo())
         return false;
+
+    // A source the user expects to be a file is re-read through the disk cache, now that its size and
+    // duration are known. The stream information is read again afterwards, because the state of a
+    // demuxer belongs to the input it was created for.
+    if (!d->cacheReader && switchToCachedInput())
+    {
+        if (!readStreamInfo())
+            return false;
     }
 
     d->videoStreamIndex = av_find_best_stream(
@@ -199,8 +248,26 @@ bool LocalCameraArchiveDelegate::openStream()
         av_q2d(stream->avg_frame_rate),
         d->audioStreamIndex >= 0,
         d->filePlayback
-            ? QString("file, %1 s").arg(d->fileDurationUs / 1'000'000.0, 0, 'f', 3)
+            ? QString("file, %1 s%2").arg(d->fileDurationUs / 1'000'000.0, 0, 'f', 3)
+                .arg(d->cacheReader ? ", cached" : "")
             : QString("live"));
+
+    return true;
+}
+
+bool LocalCameraArchiveDelegate::readStreamInfo()
+{
+    // Let av_read_frame() bail out once playback is stopped.
+    d->formatContext->interrupt_callback.callback =
+        &LocalCameraArchiveDelegate::interruptCallback;
+    d->formatContext->interrupt_callback.opaque = this;
+
+    if (avformat_find_stream_info(d->formatContext, nullptr) < 0)
+    {
+        d->lastError = tr("Failed to read stream information from '%1'.")
+            .arg(sourceDescription());
+        return false;
+    }
 
     return true;
 }
@@ -358,12 +425,7 @@ bool LocalCameraArchiveDelegate::openUrl()
         {
             case StreamScheme::http:
                 // Progressive HTTP, HLS (m3u8) and DASH are all auto-detected by FFmpeg.
-                options = {
-                    {"rw_timeout", "8000000"},
-                    {"reconnect", "1"},
-                    {"reconnect_streamed", "1"},
-                    {"reconnect_delay_max", "4"},
-                    {"user_agent", "NxMetaClient"}};
+                options = httpOptions();
                 break;
 
             case StreamScheme::rtmp:
@@ -392,8 +454,77 @@ bool LocalCameraArchiveDelegate::openUrl()
     return false;
 }
 
+bool LocalCameraArchiveDelegate::switchToCachedInput()
+{
+    // Only a source the user expects to be a finite file, served over plain HTTP, is worth caching.
+    // Anything else is read directly, as it was before the cache existed.
+    if (!d->filePlaybackExpected || schemeOf(d->url) != StreamScheme::http)
+        return false;
+
+    const qint64 duration = d->formatContext->duration; //< In AV_TIME_BASE units (microseconds).
+    const bool ioSeekable = d->formatContext->pb
+        && (d->formatContext->pb->seekable & AVIO_SEEKABLE_NORMAL);
+    const qint64 size = d->formatContext->pb ? avio_size(d->formatContext->pb) : -1;
+
+    NX_DEBUG(typeid(LocalCameraArchiveDelegate),
+        "Cache probe of '%1': duration %2 us, seekable %3, size %4 bytes, format '%5'",
+        sourceDescription(), duration, ioSeekable, size,
+        d->formatContext->iformat && d->formatContext->iformat->name
+            ? d->formatContext->iformat->name
+            : "unknown");
+
+    // A file reports a finite duration and its I/O can seek. A live stream, and a container whose
+    // input is not the media itself (a playlist), keeps being read directly.
+    if (duration <= 0 || !ioSeekable || size <= 0
+        || !readsResourceDirectly(d->formatContext->iformat))
+    {
+        return false;
+    }
+
+    StreamCache* const cache = appContext()->streamCache();
+    const std::shared_ptr<StreamCacheReader> reader = cache ? cache->open(d->url, size) : nullptr;
+    if (!reader)
+        return false;
+
+    // Read the resource through the cache instead of the connection just used to probe it. The cache
+    // owns its input, so the format context must be told not to close it; the cache is also what
+    // keeps the file seekable no matter how the connection behaves.
+    closeStream();
+    d->cacheReader = reader;
+
+    AVFormatContext* const formatContext = avformat_alloc_context();
+    if (!formatContext)
+    {
+        d->lastError = tr("Failed to allocate an FFmpeg context.");
+        closeStream();
+        return false;
+    }
+
+    formatContext->flags |= AVFMT_FLAG_CUSTOM_IO;
+    formatContext->pb = d->cacheReader->avioContext();
+    formatContext->interrupt_callback.callback = &LocalCameraArchiveDelegate::interruptCallback;
+    formatContext->interrupt_callback.opaque = this;
+    d->formatContext = formatContext;
+
+    // The URL is only a hint for the format probing here: the data itself comes from the cache.
+    if (avformat_open_input(&d->formatContext, d->url.toUtf8().constData(),
+            /*inputFormat*/ nullptr, /*options*/ nullptr) < 0)
+    {
+        d->lastError = tr("Failed to open the cached stream '%1'.").arg(sourceDescription());
+        closeStream();
+        return false;
+    }
+
+    return true;
+}
+
 void LocalCameraArchiveDelegate::closeStream()
 {
+    // A download in progress cannot be interrupted from the outside, so the reader is asked to give
+    // up before it is released, which is what unblocks a reader thread stuck in a network read.
+    if (d->cacheReader)
+        d->cacheReader->requestStop();
+
     if (d->packet)
         av_packet_free(&d->packet);
 
@@ -413,6 +544,9 @@ void LocalCameraArchiveDelegate::closeStream()
     d->filePlayback = false;
     d->fileDurationUs = 0;
     d->fileBaseTimestampUs = 0;
+
+    // Released last: the format context above is the one using its input.
+    d->cacheReader.reset();
 }
 
 bool LocalCameraArchiveDelegate::open(
@@ -442,6 +576,9 @@ void LocalCameraArchiveDelegate::close()
 void LocalCameraArchiveDelegate::pleaseStop()
 {
     m_needStop = true;
+
+    if (d->cacheReader)
+        d->cacheReader->requestStop();
 }
 
 qint64 LocalCameraArchiveDelegate::startTime() const
@@ -461,7 +598,9 @@ qint64 LocalCameraArchiveDelegate::seek(qint64 time, bool findIFrame)
     if (!d->filePlayback || !d->formatContext)
         return -1;
 
-    time = qMax(0ll, time);
+    // The caller may ask for the very end of the file, which must not overflow when the base
+    // timestamp is added to it.
+    time = qBound<qint64>(0, time, d->fileDurationUs);
     const qint64 target = d->fileBaseTimestampUs + time;
     const int result = av_seek_frame(d->formatContext, /*stream_index*/ -1, target,
         findIFrame ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_ANY);
