@@ -19,6 +19,7 @@
 #include <nx/vms/client/desktop/event_search/right_panel_globals.h>
 #include <nx/vms/client/desktop/export/settings/export_layout_persistent_settings.h>
 #include <nx/vms/client/desktop/export/settings/export_media_persistent_settings.h>
+#include <nx/vms/client/desktop/iptv/iptv_playlist.h>
 #include <nx/vms/client/desktop/jsapi/auth_allowed_urls.h>
 #include <nx/vms/client/desktop/playlists/playlist.h>
 #include <nx/vms/client/desktop/resource/local_camera/local_camera_source.h>
@@ -158,6 +159,9 @@ public:
 
     Property<QList<LocalCameraSource>> localCameraSources{this, "localCameraSources", {},
         "Client-side video sources configured by the user, e.g. RTSP cameras."};
+
+    Property<QList<IptvPlaylist>> iptvPlaylists{this, "iptvPlaylists", {},
+        "IPTV playlists imported by the user, kept locally."};
 
     Property<bool> allowMtDecoding{this, "allowMtDecoding", true,
         "Disable MT decoding if false, enable auto selection if true."};

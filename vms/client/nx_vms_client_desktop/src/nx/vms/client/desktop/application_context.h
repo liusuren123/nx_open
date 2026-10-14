@@ -33,6 +33,7 @@ class ResourceDirectoryBrowser;
 class ResourcesChangesManager;
 class PlaylistManager;
 class LocalCameraManager;
+class IptvManager;
 class RunningInstancesManager;
 class ScreenRecordingSettings;
 class SharedMemoryManager;
@@ -220,6 +221,8 @@ public:
     PlaylistManager* playlistManager() const;
 
     LocalCameraManager* localCameraManager() const;
+
+    IptvManager* iptvManager() const;
 
     QnForgottenSystemsManager* forgottenSystemsManager() const;
 

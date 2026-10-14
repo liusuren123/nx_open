@@ -49,6 +49,7 @@
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
 #include <nx/vms/client/desktop/playlists/playlist_model.h>
 #include <nx/vms/client/desktop/playlists/playlist_player.h>
+#include <nx/vms/client/desktop/iptv/iptv_manager.h>
 #include <nx/vms/client/desktop/resource/local_camera/local_camera_manager.h>
 #include <nx/vms/client/desktop/resource/resource_status_helper.h>
 #include <nx/vms/client/desktop/resource_dialogs/filtering/filtered_resource_proxy_model.h>
@@ -298,6 +299,13 @@ void registerQmlTypesInternal()
         [](QQmlEngine* /*qmlEngine*/, QJSEngine* /*jsEngine*/) -> QObject*
         {
             return core::withCppOwnership(appContext()->localCameraManager());
+        });
+
+    qmlRegisterSingletonType<IptvManager>("nx.vms.client.desktop", 1, 0,
+        "IptvManager",
+        [](QQmlEngine* /*qmlEngine*/, QJSEngine* /*jsEngine*/) -> QObject*
+        {
+            return core::withCppOwnership(appContext()->iptvManager());
         });
 
     qmlRegisterType<FisheyeCalibrator>("nx.vms.client.desktop", 1, 0, "FisheyeCalibrator");

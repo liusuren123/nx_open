@@ -113,6 +113,16 @@ Item
                         text: qsTr("Local sources…")
                         onClicked: localSourcesDialog.show()
                     }
+
+                    Button
+                    {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 130
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        text: qsTr("IPTV…")
+                        onClicked: iptvDialog.show()
+                    }
                 }
 
                 Rectangle
@@ -221,6 +231,13 @@ Item
     LocalSourcesDialog
     {
         id: localSourcesDialog
+
+        transientParent: resourcesPanel.Window.window
+    }
+
+    IptvDialog
+    {
+        id: iptvDialog
 
         transientParent: resourcesPanel.Window.window
     }
