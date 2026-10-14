@@ -9,6 +9,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtCore/QVariantMap>
 #include <QtGui/QKeyEvent>
 #include <QtNetwork/QNetworkReply>
@@ -205,7 +206,26 @@ bool IptvManager::addSourceToCurrentPlaylist(const QString& source)
 
 QString IptvManager::streamTitle(const QString& url)
 {
-    const QString name = QUrl(url).path().section('/', -1);
+    const QUrl parsed(url);
+
+    // Proxy URLs carry the real file name in a query parameter, as in ".../proxy?path=a%2Fb.m3u8".
+    const auto items = QUrlQuery(parsed).queryItems(QUrl::FullyDecoded);
+    for (const auto& item: items)
+    {
+        const QString& key = item.first;
+        if (key.compare("path", Qt::CaseInsensitive) != 0
+            && key.compare("url", Qt::CaseInsensitive) != 0
+            && key.compare("file", Qt::CaseInsensitive) != 0)
+        {
+            continue;
+        }
+
+        const QString name = item.second.section('/', -1);
+        if (!name.isEmpty())
+            return name;
+    }
+
+    const QString name = parsed.path().section('/', -1);
     return name.isEmpty() ? url : name;
 }
 

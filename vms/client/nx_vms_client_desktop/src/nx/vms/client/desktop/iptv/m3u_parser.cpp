@@ -51,6 +51,18 @@ QString titleFromUrl(const QString& url)
     return name.isEmpty() ? url : name;
 }
 
+/**
+ * Whether the data is an HLS playlist. Its `#EXTINF` entries describe the segments of a single
+ * video (a media playlist) or the variants of one stream (a master playlist), not channels, so
+ * treating them as channels would turn one video into hundreds of bogus entries.
+ */
+bool isHlsPlaylist(const QString& text)
+{
+    static const QRegularExpression pattern(
+        QStringLiteral(R"re(^[ \t]*#EXT-X-)re"), QRegularExpression::MultilineOption);
+    return pattern.match(text).hasMatch();
+}
+
 } // namespace
 
 QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, const QString& baseUrl, QString* error)
@@ -61,6 +73,15 @@ QList<IptvChannel> parseM3uPlaylist(const QByteArray& data, const QString& baseU
     QString text = QString::fromUtf8(data);
     if (text.startsWith(QChar(0xFEFF)))
         text.remove(0, 1); //< Strip the byte order mark.
+
+    if (isHlsPlaylist(text))
+    {
+        if (error)
+            *error = "The file is an HLS playlist, not a list of channels.";
+
+        NX_DEBUG(typeid(parseM3uPlaylist), "HLS playlist detected, no channels parsed");
+        return {};
+    }
 
     QList<IptvChannel> channels;
     IptvChannel pending;
