@@ -148,6 +148,8 @@ private:
     void commitTypedNumber();
     /** True when the keyboard focus is in a text field, where digits must not switch channels. */
     static bool isTextInputFocused();
+    /** True when the keyboard focus is inside the workbench video area. */
+    static bool isVideoAreaFocused();
     /** True while the main window (rather than a dialog) is the active window. */
     static bool isMainWindowActive();
     /** Returns a copy: the settings property hands out its value by value. */

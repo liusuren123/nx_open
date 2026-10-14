@@ -17,6 +17,7 @@
 #include <QtQuick/QQuickWindow>
 #include <QtQuickWidgets/QQuickWidget>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QGraphicsView>
 
 #include <core/resource_management/resource_pool.h>
 #include <nx/utils/log/log.h>
@@ -383,6 +384,28 @@ bool IptvManager::isTextInputFocused()
     return false;
 }
 
+bool IptvManager::isVideoAreaFocused()
+{
+    QWidget* focus = QApplication::focusWidget();
+    const auto windowContext = appContext()->mainWindowContext();
+    QWidget* mainWindow = windowContext ? windowContext->mainWindowWidget() : nullptr;
+    if (!focus || !mainWindow)
+        return false;
+
+    // The workbench scene is the only graphics view inside the main window. The side panels are
+    // child widgets of it, so merely being a descendant does not count as focusing the video area.
+    QGraphicsView* sceneView = mainWindow->findChild<QGraphicsView*>();
+    if (!sceneView)
+        return false;
+
+    if (focus == sceneView || focus == sceneView->viewport())
+        return true;
+
+    // The scene itself is drawn by a QQuickWidget placed inside the viewport.
+    QWidget* sceneItem = sceneView->findChild<QWidget*>(QStringLiteral("Scene"));
+    return sceneItem && focus == sceneItem;
+}
+
 bool IptvManager::isMainWindowActive()
 {
     const auto windowContext = appContext()->mainWindowContext();
@@ -407,6 +430,20 @@ bool IptvManager::eventFilter(QObject* watched, QEvent* event)
             return true;
 
         case Qt::Key_PageUp:
+            playPrevious();
+            return true;
+
+        // The arrow keys are shared with list navigation, so they switch channels only while the
+        // video area itself has the focus.
+        case Qt::Key_Down:
+            if (!isVideoAreaFocused())
+                break;
+            playNext();
+            return true;
+
+        case Qt::Key_Up:
+            if (!isVideoAreaFocused())
+                break;
             playPrevious();
             return true;
 
