@@ -84,11 +84,15 @@ public:
     Q_INVOKABLE bool importFromFile(const QString& path, const QString& name);
 
     /**
-     * Downloads or reads the playlist at the given source and appends its channels to the current
+     * Downloads or reads the playlist at the given source and appends what it lists to the current
      * local playlist. Unlike importFromUrl(), nothing is kept as a reusable IPTV playlist: the
      * channels become ordinary playlist entries.
+     *
+     * @param name Optional name of the added source. It becomes the title of a single stream, and a
+     *     prefix of the channel titles when the source is a channel list. When empty, a name is
+     *     derived from the URL.
      */
-    Q_INVOKABLE bool addSourceToCurrentPlaylist(const QString& source);
+    Q_INVOKABLE bool addSourceToCurrentPlaylist(const QString& source, const QString& name);
 
     /**
      * Opens a network stream in the current layout, reusing the resource created for it earlier.

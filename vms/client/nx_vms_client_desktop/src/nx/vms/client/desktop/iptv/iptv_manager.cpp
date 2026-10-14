@@ -181,7 +181,7 @@ bool IptvManager::importFromFile(const QString& path, const QString& name)
     return startImport(path.trimmed(), name, nx::Uuid(), ImportTarget::StorePlaylist);
 }
 
-bool IptvManager::addSourceToCurrentPlaylist(const QString& source)
+bool IptvManager::addSourceToCurrentPlaylist(const QString& source, const QString& name)
 {
     const QString trimmed = source.trimmed();
     m_lastError.clear();
@@ -196,12 +196,12 @@ bool IptvManager::addSourceToCurrentPlaylist(const QString& source)
     // playlist to download, so it is added as one entry right away.
     if (trimmed.contains("://") && !isRemoteSource(trimmed))
     {
-        const bool added = addStreamToCurrentPlaylist(trimmed, QString());
+        const bool added = addStreamToCurrentPlaylist(trimmed, name.trimmed());
         emit importFinished(added);
         return added;
     }
 
-    return startImport(trimmed, QString(), nx::Uuid(), ImportTarget::CurrentPlaylist);
+    return startImport(trimmed, name, nx::Uuid(), ImportTarget::CurrentPlaylist);
 }
 
 QString IptvManager::streamTitle(const QString& url)
@@ -696,7 +696,8 @@ bool IptvManager::finishImport(const QByteArray& data)
         // playlist, for instance, only contains segment URLs. Add it as one entry rather than fail.
         if (m_pendingTarget == ImportTarget::CurrentPlaylist && isRemoteSource(m_pendingSource))
         {
-            const bool added = addStreamToCurrentPlaylist(m_pendingSource, QString());
+            const bool added =
+                addStreamToCurrentPlaylist(m_pendingSource, m_pendingName.trimmed());
             emit importFinished(added);
             return added;
         }
@@ -726,6 +727,11 @@ bool IptvManager::finishImport(const QByteArray& data)
             return false;
         }
 
+        // An optional name identifies the source in the list; it becomes a prefix of every title so
+        // entries from different sources stay distinguishable. A URL-derived name is unhelpful here,
+        // so an empty name simply leaves the channel titles untouched.
+        const QString prefix = m_pendingName.trimmed();
+
         QList<PlaylistEntry> entries;
         entries.reserve(channels.size());
         for (const IptvChannel& channel: channels)
@@ -734,9 +740,13 @@ bool IptvManager::finishImport(const QByteArray& data)
             entry.url = channel.url;
             entry.username = channel.username;
             entry.password = channel.password;
-            entry.title = channel.group.isEmpty()
+
+            const QString title = channel.group.isEmpty()
                 ? channel.name
                 : QString("%1 \u00b7 %2").arg(channel.group, channel.name);
+            entry.title = prefix.isEmpty()
+                ? title
+                : QString("%1 \u00b7 %2").arg(prefix, title);
             entries.append(entry);
         }
 

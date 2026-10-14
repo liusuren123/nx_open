@@ -433,6 +433,7 @@ Item
                 onClicked:
                 {
                     sourceField.text = ""
+                    nameField.text = ""
                     errorText.text = ""
                     addSourceDialog.show()
                     sourceField.forceActiveFocus()
@@ -696,14 +697,14 @@ Item
         transientParent: playlistBrowser.Window.window
 
         width: 520
-        height: 220
+        height: 270
         x: (Screen.width - width) / 2
         y: (Screen.height - height) / 2
 
         function submit()
         {
             errorText.text = ""
-            if (!IptvManager.addSourceToCurrentPlaylist(sourceField.text.trim()))
+            if (!IptvManager.addSourceToCurrentPlaylist(sourceField.text.trim(), nameField.text))
                 errorText.text = IptvManager.lastError()
         }
 
@@ -727,6 +728,16 @@ Item
 
                 Layout.fillWidth: true
                 placeholderText: qsTr("http://host/playlist.m3u, rtsp://host/stream or C:\\list.m3u")
+                selectByMouse: true
+                onAccepted: addSourceDialog.submit()
+            }
+
+            TextField
+            {
+                id: nameField
+
+                Layout.fillWidth: true
+                placeholderText: qsTr("Name (optional) - shown in the list instead of the URL")
                 selectByMouse: true
                 onAccepted: addSourceDialog.submit()
             }
