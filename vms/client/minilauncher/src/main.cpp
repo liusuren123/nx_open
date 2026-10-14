@@ -153,14 +153,19 @@ Version getSharedApplauncherVersion()
 
 int launchFile(int argc, LPWSTR* argv)
 {
+    // Prefer the applauncher shipped next to this minilauncher: it always knows the installation it
+    // belongs to, even when the client is installed outside the default directory, whereas the
+    // shared copy may still point at the default location. The shared applauncher is used only when
+    // it is strictly newer, as it may know installations this one does not.
+    //
     // In some rare cases existing applauncher may fail to launch the just installed client binary
     // (e.g. when client installation path was changed during rebranding).
     // We should use local applauncher to make client execution possible. Shared applauncher and
     // existing minilauncher copies will be updated by the executed client, so after the first
     // client launch shared applauncher and all minilaunchers will have the same (new) version.
-    if (getSharedApplauncherVersion() < kMinilauncherVersion)
+    if (getSharedApplauncherVersion() <= kMinilauncherVersion)
     {
-        // The shared applauncher is outdated or does not exist.
+        // The shared applauncher is outdated, missing or not newer than the local one.
         if (launchInDir(getInstalledApplauncherDir(), argc, argv))
             return 0;
     }

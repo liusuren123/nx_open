@@ -11,6 +11,8 @@
                 InstallCondition="InstallClientOnly=1 OR InstallClientAndServer=1"
                 Vital="yes"
                 Compressed="yes">
+                <!-- The folder picked on the options page overrides the MSI's default INSTALLDIR. -->
+                <MsiProperty Name="INSTALLDIR" Value="[InstallFolder]" />
             </MsiPackage>
 
             <!-- WiX generates a random registration id for every bundle, so rebuilding and

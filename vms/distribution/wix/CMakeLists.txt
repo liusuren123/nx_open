@@ -8,7 +8,7 @@ include(${open_source_root}/cmake/wix_utils.cmake)
 set(client_qml_directory "${CMAKE_CURRENT_BINARY_DIR}/desktop_client/qml")
 
 set(client_launch_target
-    "[ProgramFiles64Folder]/${windowsInstallPath}/${customization.vmsName}/Client/${full_release_version}/${minilauncher.binary.name}"
+    "[InstallFolder]/Client/${full_release_version}/${minilauncher.binary.name}"
     CACHE INTERNAL "" FORCE)
 
 set(wix_theme_file "${CMAKE_CURRENT_BINARY_DIR}/theme.xml" CACHE INTERNAL "" FORCE)

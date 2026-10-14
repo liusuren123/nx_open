@@ -2,6 +2,9 @@
 
 #include <nx/branding.h>
 
+#include <QtCore/QDir>
+#include <QtCore/QSettings>
+
 namespace nx::branding {
 
 QString colorTheme()
@@ -115,6 +118,25 @@ QString licensingAddress()
 
 QString installationRoot()
 {
+    // The installer lets the user choose the installation directory, so the root is not always the
+    // default one compiled into the binary. The installer records the chosen root in the registry
+    // (per machine); honor it and fall back to the default when it is absent.
+#if defined(Q_OS_WIN)
+    static const QString recordedRoot =
+        []()
+        {
+            QSettings settings(QSettings::NativeFormat, QSettings::SystemScope,
+                company(), desktopClientInternalName());
+            const QString value = settings.value("InstallLocation").toString();
+            return value.isEmpty()
+                ? QString()
+                : QDir::cleanPath(QDir::fromNativeSeparators(value));
+        }();
+
+    if (!recordedRoot.isEmpty())
+        return recordedRoot;
+#endif
+
     return R"(${installation_root})";
 }
 

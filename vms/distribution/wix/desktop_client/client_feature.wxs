@@ -5,6 +5,19 @@
     <Fragment Id='FragmentClient'>
         <DirectoryRef Id="INSTALLDIR">
 
+            <!-- Records the actual installation root so the launcher and the client itself can find
+                 the installation when the user chose a folder other than the default one. Keep the
+                 key and the value name in sync with nx::branding::installationRoot(). -->
+            <Component Id="ClientInstallLocation">
+                <RegistryKey Root="HKLM" Key="${client_registry_path}">
+                    <RegistryValue
+                        Type="string"
+                        Name="InstallLocation"
+                        Value="[INSTALLDIR]"
+                        KeyPath="yes"/>
+                </RegistryKey>
+            </Component>
+
             <Component Id="ClientEulaVersion">
                 <RegistryKey
                         Root="HKCU"
@@ -238,6 +251,7 @@
             <ComponentRef Id="ClientExecutable" />
             <ComponentRef Id="ClientUriHandler"/>
             <ComponentRef Id="ClientEulaVersion"/>
+            <ComponentRef Id="ClientInstallLocation"/>
             <ComponentRef Id="QtConf"/>
 
             <ComponentGroupRef Id="nx_log_viewer"/>

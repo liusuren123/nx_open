@@ -14,6 +14,12 @@
 
         <Variable Name="InstallClientOnly" Type="numeric" Value="1" />
 
+        <!-- The folder selected on the options page. It defaults to the MSI's own directory layout
+             and is handed to the MSI as INSTALLDIR, so the user may install elsewhere. -->
+        <Variable Name="InstallFolder" Type="string"
+            Value="[ProgramFiles64Folder]\${windowsInstallPath}\${customization.vmsName}"
+            bal:Overridable="yes" />
+
         <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.HyperlinkLicense">
             <Payload SourceFile="${customization_dir}/license.html" />
             <Payload SourceFile="${customization_dir}/icons/windows/installer_bg.png" />
@@ -21,7 +27,7 @@
             <Payload SourceFile="${customization_dir}/icons/windows/logo-64x64.png" />
 
             <bal:WixStandardBootstrapperApplication
-                SuppressOptionsUI="yes"
+                SuppressOptionsUI="no"
                 LicenseUrl="license.html"
                 ShowFilesInUse="yes"
                 SuppressRepair="yes"

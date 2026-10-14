@@ -4,6 +4,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QLockFile>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
@@ -35,6 +36,7 @@ namespace {
 static constexpr int kUpdateLockTimeoutMs = 1000;
 static const QString kApplauncher = "applauncher";
 static const QString kApplauncherBackup = "applauncher-backup";
+static const QString kApplauncherBuildFile = "applauncher.build";
 static const QString kQuickStartGuide = "quick_start_guide";
 static const QString kMobileHelp = "mobile_help";
 static const QString kDesktopFileName = nx::branding::installerName() + ".desktop";
@@ -392,7 +394,18 @@ void SelfUpdater::updateApplauncher()
     /* Check installed applauncher version. */
     const auto versionFile = targetDir.absoluteFilePath(nx::branding::launcherVersionFile());
     const auto applauncherVersion = getVersionFromFile(versionFile);
-    if (m_clientVersion <= applauncherVersion)
+
+    /* The version does not change on a rebuild, so also compare the revision the shared copy was
+     * made from: a fix shipped under the same version must still replace the outdated copy. */
+    const auto buildFile = targetDir.absoluteFilePath(kApplauncherBuildFile);
+    QString installedBuild;
+    {
+        QFile file(buildFile);
+        if (file.open(QIODevice::ReadOnly))
+            installedBuild = QString::fromUtf8(file.readAll()).trimmed();
+    }
+
+    if (m_clientVersion <= applauncherVersion && installedBuild == nx::build_info::revision())
     {
         NX_INFO(this, "Applauncher is up to date");
 
@@ -503,6 +516,16 @@ void SelfUpdater::updateApplauncher()
         NX_ERROR(this, "Version could not be written to file: %1.", versionFile);
         NX_ERROR(this, "Failed to update Applauncher.");
         return;
+    }
+
+    /* Remember which build the shared copy was made from. */
+    {
+        QFile file(buildFile);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        {
+            file.write(nx::build_info::revision().toUtf8());
+            file.close();
+        }
     }
 
     QDir(backupDir).removeRecursively();
