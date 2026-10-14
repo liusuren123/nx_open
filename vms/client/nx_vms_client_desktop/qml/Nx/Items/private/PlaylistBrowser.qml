@@ -492,6 +492,22 @@ Item
         return PlaylistManager.entryPath(PlaylistManager.currentPlaylistId, row)
     }
 
+    function entryUrlAt(row)
+    {
+        return PlaylistManager.entryUrl(PlaylistManager.currentPlaylistId, row)
+    }
+
+    function entryIsStreamAt(row)
+    {
+        return entryUrlAt(row).length > 0
+    }
+
+    /** Path of local media or URL of a stream: whatever identifies the entry. */
+    function entryTargetAt(row)
+    {
+        return entryIsStreamAt(row) ? entryUrlAt(row) : entryPathAt(row)
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Playlist actions menu.
 
@@ -610,8 +626,8 @@ Item
                     visible: targetPlaylistId !== PlaylistManager.currentPlaylistId
                     text: name
 
-                    onTriggered: PlaylistManager.addPaths(targetPlaylistId,
-                        [playlistBrowser.entryPathAt(entryContextMenu.targetRow)])
+                    onTriggered: PlaylistManager.copyEntry(PlaylistManager.currentPlaylistId,
+                        entryContextMenu.targetRow, targetPlaylistId)
                 }
 
                 onObjectAdded: (index, object) =>
@@ -625,16 +641,18 @@ Item
 
         NxControls.CompactMenuItem
         {
-            text: qsTr("Copy path")
+            text: playlistBrowser.entryIsStreamAt(entryContextMenu.targetRow)
+                ? qsTr("Copy URL") : qsTr("Copy path")
             enabled: entryContextMenu.targetRow >= 0
             onTriggered: NxGlobals.copyToClipboard(
-                playlistBrowser.entryPathAt(entryContextMenu.targetRow))
+                playlistBrowser.entryTargetAt(entryContextMenu.targetRow))
         }
 
         NxControls.CompactMenuItem
         {
             text: qsTr("Show in file manager")
             enabled: entryContextMenu.targetRow >= 0
+                && !playlistBrowser.entryIsStreamAt(entryContextMenu.targetRow)
             onTriggered: PlaylistManager.showInFileManager(
                 playlistBrowser.entryPathAt(entryContextMenu.targetRow))
         }

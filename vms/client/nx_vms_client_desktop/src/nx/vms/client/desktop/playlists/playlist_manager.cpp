@@ -429,6 +429,26 @@ QString PlaylistManager::entryPath(const QString& playlistId, int row) const
         : QString();
 }
 
+QString PlaylistManager::entryUrl(const QString& playlistId, int row) const
+{
+    const auto entries = playlist(playlistId).entries;
+    return row >= 0 && row < static_cast<int>(entries.size())
+        ? entries.at(row).url
+        : QString();
+}
+
+bool PlaylistManager::copyEntry(const QString& fromPlaylistId, int row, const QString& toPlaylistId)
+{
+    if (fromPlaylistId.isEmpty() || fromPlaylistId == toPlaylistId)
+        return false;
+
+    const auto entries = playlist(fromPlaylistId).entries;
+    if (row < 0 || row >= static_cast<int>(entries.size()))
+        return false;
+
+    return addEntries(toPlaylistId, {entries.at(row)});
+}
+
 void PlaylistManager::showInFileManager(const QString& path) const
 {
     if (!path.isEmpty())

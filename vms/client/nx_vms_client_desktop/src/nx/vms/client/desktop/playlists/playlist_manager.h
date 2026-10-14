@@ -103,6 +103,15 @@ public:
     /** Absolute path of the entry at the given row of the given playlist; empty if out of range. */
     Q_INVOKABLE QString entryPath(const QString& playlistId, int row) const;
 
+    /** URL of the entry at the given row; empty when the entry is local media. */
+    Q_INVOKABLE QString entryUrl(const QString& playlistId, int row) const;
+
+    /**
+     * Appends a copy of an entry of one playlist to another. The entry is copied as it is, so a
+     * folder stays a folder and a stream keeps its URL.
+     */
+    Q_INVOKABLE bool copyEntry(const QString& fromPlaylistId, int row, const QString& toPlaylistId);
+
     /** Shows the given file or folder in the OS file manager. */
     Q_INVOKABLE void showInFileManager(const QString& path) const;
 
