@@ -33,6 +33,9 @@ namespace {
 /** Stream URL scheme; selects the protocol-specific FFmpeg options. */
 enum class StreamScheme { rtsp, http, rtmp, udp, other };
 
+/** How far before the end of a file a seek to the very end is backed off to. */
+constexpr qint64 kEndSeekBackoffUs = 1'000'000;
+
 StreamScheme schemeOf(const QString& url)
 {
     const QString scheme = url.section("://", 0, 0).toLower();
@@ -599,11 +602,19 @@ qint64 LocalCameraArchiveDelegate::seek(qint64 time, bool findIFrame)
         return -1;
 
     // The caller may ask for the very end of the file, which must not overflow when the base
-    // timestamp is added to it.
+    // timestamp is added to it. The exact end is also past the last position the demuxer can seek
+    // to, so it is first tried as is and then backed off by enough to reach the last frame.
     time = qBound<qint64>(0, time, d->fileDurationUs);
-    const qint64 target = d->fileBaseTimestampUs + time;
-    const int result = av_seek_frame(d->formatContext, /*stream_index*/ -1, target,
-        findIFrame ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_ANY);
+
+    qint64 result = seekTo(time, findIFrame);
+    if (result < 0 && time == d->fileDurationUs && time > 0)
+    {
+        const qint64 backedOff = time - qMin<qint64>(kEndSeekBackoffUs, time);
+        result = seekTo(backedOff, findIFrame);
+        if (result >= 0)
+            time = backedOff;
+    }
+
     if (result < 0)
     {
         NX_WARNING(typeid(LocalCameraArchiveDelegate),
@@ -616,6 +627,15 @@ qint64 LocalCameraArchiveDelegate::seek(qint64 time, bool findIFrame)
     d->pacingStarted = false;
 
     return time;
+}
+
+qint64 LocalCameraArchiveDelegate::seekTo(qint64 time, bool findIFrame)
+{
+    const qint64 target = d->fileBaseTimestampUs + time;
+    const int result = av_seek_frame(d->formatContext, /*stream_index*/ -1, target,
+        findIFrame ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_ANY);
+
+    return result < 0 ? result : time;
 }
 
 bool LocalCameraArchiveDelegate::isFilePlayback() const

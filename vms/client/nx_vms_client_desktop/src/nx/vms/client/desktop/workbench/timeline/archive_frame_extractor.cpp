@@ -20,6 +20,8 @@
 #include <nx/utils/log/assert.h>
 #include <nx/utils/log/log.h>
 #include <nx/vms/client/core/network/remote_connection.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_archive_delegate.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_resource.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <utils/common/delayed.h>
 
@@ -371,11 +373,22 @@ ArchiveFrameExtractor::ArchiveFrameExtractor(
     {
         d->streamWorker.archiveDelegate.reset(aviResource->createArchiveDelegate());
     }
+    else if (const auto localCamera = mediaResource.dynamicCast<LocalCameraResource>())
+    {
+        // A client-side source is either a live stream or a finite file. Only a file is worth
+        // extracting thumbnails from, and opening a live one here would connect to it a second
+        // time, competing with the playback that is already running.
+        if (localCamera->isSeekableFileSource())
+        {
+            d->streamWorker.archiveDelegate = std::make_unique<LocalCameraArchiveDelegate>(
+                localCamera->deviceId(), localCamera->url(), /*filePlaybackExpected*/ true);
+        }
+    }
 
     if (!d->streamWorker.archiveDelegate)
     {
-        // Some media resources, e.g. client-side live cameras, provide neither an RTSP backend nor
-        // a local file, so there is nothing to extract frames from.
+        // Some media resources, e.g. live client-side cameras, provide neither an RTSP backend nor a
+        // local file, so there is nothing to extract frames from.
         NX_WARNING(this, "Unable to create an archive delegate for resource '%1', "
             "frame extraction is not available.", mediaResource->getName());
         return;

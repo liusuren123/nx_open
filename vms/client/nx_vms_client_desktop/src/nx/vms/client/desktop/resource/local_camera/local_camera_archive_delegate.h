@@ -81,6 +81,8 @@ private:
     bool openUrl();
     /** Reads the stream layout of the currently opened input. */
     bool readStreamInfo();
+    /** Seeks to the given position of the file, returning it or a negative FFmpeg error. */
+    qint64 seekTo(qint64 time, bool findIFrame);
     /**
      * Replaces the input of a finite file with the stream cache, so that seeking and replaying it do
      * not download it again. Returns false when the source must keep being read directly.

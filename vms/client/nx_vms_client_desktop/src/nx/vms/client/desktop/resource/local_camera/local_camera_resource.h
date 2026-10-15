@@ -41,6 +41,9 @@ public:
     /** Whether this is a user-configured source rather than an auto-detected capture device. */
     bool isUrlSource() const { return !m_url.isEmpty(); }
 
+    /** Capture device name; empty for URL sources. */
+    const QString& deviceId() const { return m_deviceId; }
+
     /** Whether the URL turned out to be a finite, seekable media file rather than a live stream. */
     bool isSeekableFileSource() const { return m_seekableFile; }
 
