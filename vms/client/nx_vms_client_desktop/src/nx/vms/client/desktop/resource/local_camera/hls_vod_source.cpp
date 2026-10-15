@@ -251,7 +251,7 @@ bool httpGet(const QString& url, std::atomic<bool>* stop, int timeoutUs, QByteAr
         if (rangeEnd >= 0)
             range += QByteArray::number(rangeEnd);
 
-        range += "\r\n";
+        // No trailing newline here: FFmpeg adds one to every header it is given.
         av_dict_set(&options, "headers", range.constData(), 0);
     }
 
@@ -388,7 +388,9 @@ struct HlsVodSource::Private
     /** Places a downloaded segment in the cache, atomically. */
     static bool writeSegmentFile(const QString& path, const QByteArray& data)
     {
-        const QString part = path + ".part";
+        // A worker and a client request may download the same segment at the same time.
+        static std::atomic<quint64> counter{0};
+        const QString part = path + QStringLiteral(".part%1").arg(counter.fetch_add(1));
         QFile file(part);
         if (!file.open(QIODevice::WriteOnly))
             return false;
@@ -484,15 +486,10 @@ struct HlsVodSource::Private
         {
             if (failed[part])
             {
-                // Nothing usable came back: a failure of the first part is reported, of any other one
-                // it means the segment simply ends before that part.
+                // Nothing usable came back: a ranged request may be refused, and a plain one still
+                // gets the segment, just slower.
                 if (assembled.isEmpty())
-                {
-                    if (errorOut)
-                        *errorOut = errors[part];
-
-                    return false;
-                }
+                    return downloadSegment(index, errorOut);
 
                 break;
             }
@@ -603,58 +600,33 @@ struct HlsVodSource::Private
     }
 
     /**
-     * Makes the segment available for a client: waits for a download in progress, and takes over when
-     * no worker managed to download it.
+     * Makes the segment available for a client.
+     *
+     * It is downloaded right here instead of being waited for: a worker fetches over a single
+     * connection, which takes tens of seconds on a server that limits connections, and every other
+     * request would be stuck behind that wait since one connection is served at a time.
      */
     bool ensureSegment(int index)
     {
-        {
-            std::unique_lock<std::mutex> lock(mutex);
-            while (!stop.load() && states[index] != Ready && states[index] != Failed)
-            {
-                if (states[index] == Pending)
-                    priority.insert(index);
-
-                condition.notify_all();
-                condition.wait_for(lock, std::chrono::milliseconds(200));
-            }
-
-            if (states[index] == Ready)
-                return true;
-
-            if (stop.load())
-                return false;
-
-            // Every worker gave up on it; download it right here, the client is waiting.
-            states[index] = Downloading;
-        }
+        if (QFile::exists(segmentPath(index)))
+            return true;
 
         QString error;
-        bool ok = false;
         for (int attempt = 0; attempt < kSegmentAttempts && !stop.load(); ++attempt)
         {
             if (downloadSegmentParallel(index, &error))
             {
-                ok = true;
-                break;
+                const std::lock_guard<std::mutex> lock(mutex);
+                states[index] = Ready;
+                return true;
             }
 
             std::this_thread::sleep_for(kSegmentRetryBaseDelay * (1 << attempt));
         }
 
-        {
-            const std::lock_guard<std::mutex> lock(mutex);
-            states[index] = ok ? Ready : Failed;
-        }
-
-        if (!ok)
-        {
-            NX_WARNING(typeid(HlsVodSource), "Cannot serve segment %1 of '%2': %3.",
-                index, playlistUrl, error);
-        }
-
-        condition.notify_all();
-        return ok;
+        NX_WARNING(typeid(HlsVodSource), "Cannot serve segment %1 of '%2': %3.",
+            index, playlistUrl, error);
+        return false;
     }
 
     static bool readRequest(QTcpSocket* socket, QString* path)
