@@ -124,6 +124,12 @@ bool fetchesMediaItself(const AVInputFormat* inputFormat)
     return (inputFormat->flags & AVFMT_NO_BYTE_SEEK) || !readsResourceDirectly(inputFormat);
 }
 
+/** Whether a URL is most likely an HLS playlist, without having to open it. */
+bool looksLikeHlsPlaylist(const QString& url)
+{
+    return url.contains(QLatin1String(".m3u8"), Qt::CaseInsensitive);
+}
+
 } // namespace
 
 struct LocalCameraArchiveDelegate::Private
@@ -208,7 +214,29 @@ bool LocalCameraArchiveDelegate::openStream()
     {
         // A finite playlist that has already been played is served from its cached copy straight away:
         // probing the remote playlist again would make opening it wait for the network every time.
-        if (!switchToPrefetchedPlaylist(/*cachedOnly*/ true))
+        const bool interfaceThread =
+            QThread::currentThread() == QCoreApplication::instance()->thread();
+
+        if (switchToPrefetchedPlaylist(/*cachedOnly*/ true))
+        {
+            if (!readStreamInfo())
+                return false;
+        }
+        else if (interfaceThread && d->filePlaybackExpected && looksLikeHlsPlaylist(d->url))
+        {
+            // The interface must not wait for the network either, so the playlist is prepared in the
+            // background and this call fails straight away. The framework retries, and the reader
+            // thread - the one that plays - is where the source is really opened.
+            if (StreamCache* const cache = appContext()->streamCache())
+            {
+                HlsVodSource::prepareInBackground(
+                    d->url, cache->folder(), cache->limitBytes(), kPrefetchConnections);
+            }
+
+            d->lastError = tr("Preparing '%1' for playback.").arg(sourceDescription());
+            return false;
+        }
+        else
         {
             if (!openUrl())
                 return false;
@@ -230,10 +258,6 @@ bool LocalCameraArchiveDelegate::openStream()
                 if (!readStreamInfo())
                     return false;
             }
-        }
-        else if (!readStreamInfo())
-        {
-            return false;
         }
     }
     else if (!openCaptureDevice())

@@ -83,6 +83,16 @@ public:
      */
     static bool isProbeReady(const QString& playlistUrl, const QString& cacheFolder);
 
+    /**
+     * Prepares a source in the background, without blocking the caller, unless one is already serving
+     * the playlist. Used by the interface, which must not wait for the network.
+     */
+    static void prepareInBackground(
+        const QString& playlistUrl,
+        const QString& cacheFolder,
+        qint64 cacheLimitBytes,
+        int connections);
+
     /** Folder the segments are cached in. */
     QString cacheFolder() const;
 

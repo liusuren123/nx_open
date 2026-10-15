@@ -21,6 +21,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
 #include <QtCore/QList>
+#include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QtMath>
 #include <QtCore/QUrl>
@@ -1034,6 +1035,41 @@ bool HlsVodSource::isProbeReady(const QString& playlistUrl, const QString& cache
     const QDir folder(cacheFolderFor(cacheFolder, playlistUrl));
     return QFile::exists(folder.absoluteFilePath("0.ts"))
         && QFile::exists(folder.absoluteFilePath("1.ts"));
+}
+
+void HlsVodSource::prepareInBackground(
+    const QString& playlistUrl,
+    const QString& cacheFolder,
+    qint64 cacheLimitBytes,
+    int connections)
+{
+    if (playlistUrl.isEmpty() || cacheFolder.isEmpty())
+        return;
+
+    // Deliberately leaked: a detached thread may still be using them while the library is unloaded.
+    static std::mutex* const preparingMutex = new std::mutex();
+    static QSet<QString>* const preparing = new QSet<QString>();
+    {
+        const std::lock_guard<std::mutex> lock(*preparingMutex);
+        if (preparing->contains(playlistUrl))
+            return;
+
+        preparing->insert(playlistUrl);
+    }
+
+    std::thread([playlistUrl, cacheFolder, cacheLimitBytes, connections]
+    {
+        QString error;
+        const bool prepared = acquire(playlistUrl, cacheFolder, cacheLimitBytes, connections, &error)
+            != nullptr;
+        if (!prepared)
+        {
+            NX_WARNING(typeid(HlsVodSource), "Cannot prepare '%1': %2.", playlistUrl, error);
+        }
+
+        const std::lock_guard<std::mutex> lock(*preparingMutex);
+        preparing->remove(playlistUrl); //< A later attempt may well succeed.
+    }).detach();
 }
 
 void HlsVodSource::stop()
