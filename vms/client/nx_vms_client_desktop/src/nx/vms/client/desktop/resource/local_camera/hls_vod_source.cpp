@@ -1024,6 +1024,18 @@ bool HlsVodSource::hasCachedPlaylist(const QString& playlistUrl, const QString& 
         QDir(cacheFolderFor(cacheFolder, playlistUrl)).absoluteFilePath("playlist.m3u8"));
 }
 
+bool HlsVodSource::isProbeReady(const QString& playlistUrl, const QString& cacheFolder)
+{
+    if (playlistUrl.isEmpty() || cacheFolder.isEmpty())
+        return false;
+
+    // A demuxer reads a little more than the first segment to identify the streams, so the beginning
+    // of the media has to be there, not just the playlist.
+    const QDir folder(cacheFolderFor(cacheFolder, playlistUrl));
+    return QFile::exists(folder.absoluteFilePath("0.ts"))
+        && QFile::exists(folder.absoluteFilePath("1.ts"));
+}
+
 void HlsVodSource::stop()
 {
     if (!d)

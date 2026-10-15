@@ -555,14 +555,14 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
         return false;
     }
 
-    // Setting the prefetch up costs network time while the playlist is not cached yet, and the first
-    // segment while the source has never been played. That must not happen on the GUI thread: the
-    // reader thread opens the source too, and it reuses the source set up there.
-    if (!cachedOnly && QThread::currentThread() == QCoreApplication::instance()->thread()
-        && !HlsVodSource::isServing(d->url))
+    // The interface must never wait for the network or for a download: it is served locally only when
+    // everything a demuxer needs to open the playlist is already cached. The reader thread opens the
+    // source as well, and it is where the prefetch is set up while the data is not there yet.
+    if (QThread::currentThread() == QCoreApplication::instance()->thread()
+        && !HlsVodSource::isProbeReady(d->url, cache->folder()))
     {
         NX_DEBUG(typeid(LocalCameraArchiveDelegate),
-            "Not prefetching '%1' on the GUI thread: the source is not serving it yet.",
+            "Not prefetching '%1' on the GUI thread: the beginning of the media is not cached yet.",
             sourceDescription());
         return false;
     }

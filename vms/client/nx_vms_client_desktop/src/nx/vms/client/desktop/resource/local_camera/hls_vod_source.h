@@ -77,6 +77,12 @@ public:
      */
     static bool hasCachedPlaylist(const QString& playlistUrl, const QString& cacheFolder);
 
+    /**
+     * Whether the media a demuxer needs to identify the streams is already cached, so that opening the
+     * playlist does not have to wait for a download.
+     */
+    static bool isProbeReady(const QString& playlistUrl, const QString& cacheFolder);
+
     /** Folder the segments are cached in. */
     QString cacheFolder() const;
 
