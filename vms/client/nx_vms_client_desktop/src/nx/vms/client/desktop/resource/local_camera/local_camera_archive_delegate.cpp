@@ -100,6 +100,22 @@ bool readsResourceDirectly(const AVInputFormat* inputFormat)
     return true;
 }
 
+/**
+ * Whether the demuxer fetches the media itself instead of reading it from the resource it was given
+ * (HLS, DASH, ...). Such a demuxer seeks the stream rather than its input, so the input does not
+ * have to support byte seeking - a playlist served by a server that ignores Range requests cannot
+ * be seeked by bytes at all, and yet the media itself can be seeked and has a known duration.
+ */
+bool fetchesMediaItself(const AVInputFormat* inputFormat)
+{
+    if (!inputFormat)
+        return false;
+
+    // FFmpeg marks the demuxers that do not seek their input by bytes, and a manifest is one of them
+    // by nature, whether or not it is marked as such.
+    return (inputFormat->flags & AVFMT_NO_BYTE_SEEK) || !readsResourceDirectly(inputFormat);
+}
+
 } // namespace
 
 struct LocalCameraArchiveDelegate::Private
@@ -286,12 +302,25 @@ void LocalCameraArchiveDelegate::detectFilePlayback()
     if (!d->filePlaybackExpected)
         return;
 
-    // A file reports a finite duration and its I/O can seek. Anything else keeps being live.
+    // A file reports a finite duration; anything else keeps being live.
     const qint64 duration = d->formatContext->duration; //< In AV_TIME_BASE units (microseconds).
+
+    // It has to be seekable as well, or the timeline would be useless. A demuxer that fetches the
+    // media itself seeks the stream, while every other one seeks through its input, which then has
+    // to support it.
     const bool ioSeekable = d->formatContext->pb
         && (d->formatContext->pb->seekable & AVIO_SEEKABLE_NORMAL);
-    if (duration <= 0 || !ioSeekable)
+    const AVInputFormat* const inputFormat = d->formatContext->iformat;
+    const bool selfSeeking = fetchesMediaItself(inputFormat);
+    if (duration <= 0 || (!ioSeekable && !selfSeeking))
+    {
+        NX_DEBUG(typeid(LocalCameraArchiveDelegate),
+            "Source '%1' is played as a live stream: duration %2 us, seekable input %3, "
+            "format '%4' fetches the media itself: %5",
+            sourceDescription(), duration, ioSeekable,
+            inputFormat && inputFormat->name ? inputFormat->name : "unknown", selfSeeking);
         return;
+    }
 
     d->filePlayback = true;
     d->fileDurationUs = duration;
@@ -601,13 +630,13 @@ qint64 LocalCameraArchiveDelegate::seek(qint64 time, bool findIFrame)
     if (!d->filePlayback || !d->formatContext)
         return -1;
 
-    // The caller may ask for the very end of the file, which must not overflow when the base
-    // timestamp is added to it. The exact end is also past the last position the demuxer can seek
-    // to, so it is first tried as is and then backed off by enough to reach the last frame.
+    // The caller may ask for a position at or past the end of the file. That must not overflow when
+    // the base timestamp is added to it, and the very end is also past the last position the demuxer
+    // is able to seek to, so a failed seek is retried a little earlier.
     time = qBound<qint64>(0, time, d->fileDurationUs);
 
     qint64 result = seekTo(time, findIFrame);
-    if (result < 0 && time == d->fileDurationUs && time > 0)
+    if (result < 0 && time > 0)
     {
         const qint64 backedOff = time - qMin<qint64>(kEndSeekBackoffUs, time);
         result = seekTo(backedOff, findIFrame);
