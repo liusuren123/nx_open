@@ -118,6 +118,9 @@ QnStartupParameters QnStartupParameters::fromCommandLineArg(int argc, char** arg
     addParserParam(commandLineParser, &strCustomUri, QString("%1://").arg(
         nx::branding::nativeUriProtocol()).toUtf8().constData());
 
+    /* Playback control protocol, used by external programs. Handled before the window is created. */
+    addParserParam(commandLineParser, &result.nxOptxCommand, "--nxoptx");
+
     QString strVideoWallGuid;
     QString strVideoWallItemGuid;
     addParserParam(commandLineParser, &strVideoWallGuid, "--videowall");

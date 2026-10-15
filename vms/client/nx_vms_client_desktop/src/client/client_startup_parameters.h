@@ -103,6 +103,12 @@ struct NX_VMS_CLIENT_DESKTOP_API QnStartupParameters
     /** Uri when the client was launched as uri handler. */
     nx::vms::utils::SystemUri customUri;
 
+    /**
+     * A command of the nxoptx protocol, passed on the command line by the URI handler registered by
+     * the client itself. Such a call is served by the running client and does not open a window.
+     */
+    QString nxOptxCommand;
+
     QString enforceSocketType;
     QString enforceMediatorEndpoint;
 

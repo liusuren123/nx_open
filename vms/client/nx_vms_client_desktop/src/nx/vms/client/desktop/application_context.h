@@ -32,6 +32,7 @@ class ResourceFactory;
 class ResourceDirectoryBrowser;
 class ResourcesChangesManager;
 class PlaylistManager;
+class NxOptxServer;
 class LocalCameraManager;
 class IptvManager;
 class RunningInstancesManager;
@@ -220,6 +221,9 @@ public:
     ResourcesChangesManager* resourcesChangesManager() const;
 
     PlaylistManager* playlistManager() const;
+
+    /** Serves the nxoptx protocol for external playback control programs. */
+    NxOptxServer* nxOptxServer() const;
 
     LocalCameraManager* localCameraManager() const;
 

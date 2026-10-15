@@ -64,6 +64,7 @@
 #include <nx/vms/client/desktop/joystick/settings/manager.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/actions.h>
+#include <nx/vms/client/desktop/nxoptx/nxoptx_server.h>
 #include <nx/vms/client/desktop/radass/radass_controller.h>
 #include <nx/vms/client/desktop/resource/resource_factory.h>
 #include <nx/vms/client/desktop/iptv/iptv_manager.h>
@@ -377,6 +378,7 @@ struct ApplicationContext::Private
     std::unique_ptr<QnForgottenSystemsManager> forgottenSystemsManager;
     std::unique_ptr<ResourcesChangesManager> resourcesChangesManager;
     std::unique_ptr<PlaylistManager> playlistManager;
+    std::unique_ptr<NxOptxServer> nxOptxServer;
     std::unique_ptr<LocalCameraManager> localCameraManager;
     std::unique_ptr<IptvManager> iptvManager;
     std::unique_ptr<StreamCache> streamCache;
@@ -807,6 +809,9 @@ ApplicationContext::ApplicationContext(
             d->forgottenSystemsManager = std::make_unique<QnForgottenSystemsManager>();
             d->resourcesChangesManager = std::make_unique<ResourcesChangesManager>();
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
+            // Serves the nxoptx protocol, through which external programs can inspect and fill the
+            // playlists, and registers the matching URI handler.
+            d->nxOptxServer = std::make_unique<NxOptxServer>(d->playlistManager.get());
             d->localCameraManager = std::make_unique<LocalCameraManager>(d->localSettings.get());
             d->iptvManager = std::make_unique<IptvManager>(d->localSettings.get());
             d->streamCache = std::make_unique<StreamCache>(d->localSettings.get());
@@ -847,6 +852,7 @@ ApplicationContext::~ApplicationContext()
     // For now it depends on a System Context, later it will be moved to the Local System Context.
     d->desktopResourceSearcher.reset();
     d->localCameraResourceSearcher.reset();
+    d->nxOptxServer.reset();
     d->localCameraManager.reset();
     d->iptvManager.reset();
     d->streamCache.reset();
@@ -1052,6 +1058,11 @@ ResourcesChangesManager* ApplicationContext::resourcesChangesManager() const
 PlaylistManager* ApplicationContext::playlistManager() const
 {
     return d->playlistManager.get();
+}
+
+NxOptxServer* ApplicationContext::nxOptxServer() const
+{
+    return d->nxOptxServer.get();
 }
 
 LocalCameraManager* ApplicationContext::localCameraManager() const

@@ -18,6 +18,7 @@
 
 #include <iostream>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -65,6 +66,7 @@
 #include <nx/vms/client/desktop/help/help_handler.h>
 #include <nx/vms/client/desktop/ini.h>
 #include <nx/vms/client/desktop/menu/action_manager.h>
+#include <nx/vms/client/desktop/nxoptx/nxoptx_protocol.h>
 #include <nx/vms/client/desktop/settings/local_settings.h>
 #include <nx/vms/client/desktop/state/client_state_handler.h>
 #include <nx/vms/client/desktop/state/window_controller.h>
@@ -557,6 +559,14 @@ int runApplication(int argc, char** argv)
     nx::utils::rlimit::setMaxFileDescriptors(8000);
 
     const QnStartupParameters startupParams = QnStartupParameters::fromCommandLineArg(argc, argv);
+
+    // The nxoptx:// URI handler starts this executable to deliver a command to the running client.
+    // Such a call is a short lived client of that instance and must not open a window of its own.
+    if (!startupParams.nxOptxCommand.isEmpty())
+    {
+        QCoreApplication consoleApplication(argc, argv);
+        return nxoptx::runCommandLineClient(startupParams.nxOptxCommand);
+    }
 
     setGraphicsSettingsEarly(startupParams);
 
