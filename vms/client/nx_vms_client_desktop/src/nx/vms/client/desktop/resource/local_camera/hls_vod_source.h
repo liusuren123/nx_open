@@ -68,6 +68,9 @@ public:
     /** Local playlist URL to be handed to FFmpeg. Empty until the source has started. */
     QString url() const;
 
+    /** Whether a source is already serving the given playlist; the registry is cheap to consult. */
+    static bool isServing(const QString& playlistUrl);
+
     /** Folder the segments are cached in. */
     QString cacheFolder() const;
 

@@ -16,6 +16,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
@@ -42,10 +43,21 @@ namespace {
 constexpr char kUserAgent[] = "NxMetaClient";
 
 /** A playlist is a small text file; a segment may take minutes on a slow server. */
-constexpr int kPlaylistTimeoutUs = 30'000'000;
+constexpr int kPlaylistTimeoutUs = 6'000'000;
 constexpr int kSegmentTimeoutUs = 25'000'000;
 constexpr int kSegmentAttempts = 4;
 constexpr std::chrono::milliseconds kSegmentRetryBaseDelay{400};
+
+/**
+ * A segment a client is waiting for is fetched as a few ranged requests at once. A single connection
+ * is limited per connection by some servers, so this is what makes the wait for the first segment
+ * (and for the one a seek lands on) short.
+ */
+constexpr int kRangeParts = 4;
+constexpr qint64 kRangePartBytes = 768 * 1024;
+
+/** Upper bound of a ranged segment download; a segment is minutes of video at most. */
+constexpr int kRangeReadsMax = 64;
 
 /** One media segment of the playlist. */
 struct Segment
@@ -222,9 +234,9 @@ QString ffmpegError(int code)
     return QStringLiteral("%1 (%2)").arg(QString::fromUtf8(buffer)).arg(code);
 }
 
-/** Reads a whole (small) HTTP resource. */
+/** Reads a whole (small) HTTP resource, optionally only a byte range of it. */
 bool httpGet(const QString& url, std::atomic<bool>* stop, int timeoutUs, QByteArray* out,
-    QString* errorOut = nullptr)
+    QString* errorOut = nullptr, qint64 rangeStart = -1, qint64 rangeEnd = -1)
 {
     AVDictionary* options = nullptr;
     av_dict_set(&options, "user_agent", kUserAgent, 0);
@@ -233,6 +245,16 @@ bool httpGet(const QString& url, std::atomic<bool>* stop, int timeoutUs, QByteAr
     av_dict_set(&options, "reconnect_streamed", "1", 0);
     av_dict_set(&options, "reconnect_on_network_error", "1", 0);
     av_dict_set(&options, "reconnect_delay_max", "2", 0);
+    if (rangeStart >= 0)
+    {
+        QByteArray range = "Range: bytes=" + QByteArray::number(rangeStart) + '-';
+        if (rangeEnd >= 0)
+            range += QByteArray::number(rangeEnd);
+
+        range += "\r\n";
+        av_dict_set(&options, "headers", range.constData(), 0);
+    }
+
     if (timeoutUs > 0)
         av_dict_set(&options, "rw_timeout", QByteArray::number(timeoutUs).constData(), 0);
 
@@ -347,6 +369,48 @@ struct HlsVodSource::Private
         }
     }
 
+    void accountCache(quint64 bytes)
+    {
+        if (remainingBytes == kUnlimited)
+            return;
+
+        if (bytes > remainingBytes)
+        {
+            remainingBytes = kUnlimited;
+            NX_WARNING(typeid(HlsVodSource), "Stream cache is full; '%1' keeps downloading without "
+                "caching it. Clear the cache to make room.", playlistUrl);
+            return;
+        }
+
+        remainingBytes -= bytes;
+    }
+
+    /** Places a downloaded segment in the cache, atomically. */
+    static bool writeSegmentFile(const QString& path, const QByteArray& data)
+    {
+        const QString part = path + ".part";
+        QFile file(part);
+        if (!file.open(QIODevice::WriteOnly))
+            return false;
+
+        const bool written = (file.write(data) == data.size());
+        const bool flushed = written && file.flush();
+        file.close();
+        if (!written || !flushed)
+        {
+            QFile::remove(part);
+            return false;
+        }
+
+        if (!QFile::rename(part, path))
+        {
+            QFile::remove(part);
+            return false;
+        }
+
+        return true;
+    }
+
     bool downloadSegment(int index, QString* errorOut)
     {
         const QString path = segmentPath(index);
@@ -370,42 +434,111 @@ struct HlsVodSource::Private
         NX_DEBUG(typeid(HlsVodSource), "Segment %1 downloaded: %2 bytes in %3 ms.",
             index, data.size(), QDateTime::currentMSecsSinceEpoch() - startedMs);
 
-        if (remainingBytes != kUnlimited)
+        accountCache(quint64(data.size()));
+        return writeSegmentFile(path, data);
+    }
+
+    /**
+     * Downloads a segment as several ranged requests at once. This is what keeps the wait for the
+     * segment a client has asked for short, since a single connection is limited per connection by
+     * some servers. Falls back to a single request when the server does not honor byte ranges, or when
+     * a part does not come back the way it should.
+     */
+    bool downloadSegmentParallel(int index, QString* errorOut)
+    {
+        const QString path = segmentPath(index);
+        if (QFile::exists(path))
+            return true;
+
+        const QString url = playlist.segments[index].url;
+        const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
+
+        std::vector<QByteArray> parts(kRangeParts);
+        std::vector<QString> errors(kRangeParts);
+        std::vector<char> failed(kRangeParts, 0);
+
+        std::vector<std::thread> threads;
+        threads.reserve(kRangeParts);
+        for (int part = 0; part < kRangeParts; ++part)
         {
-            if (quint64(data.size()) > remainingBytes)
+            threads.emplace_back([&, part]
             {
-                remainingBytes = 0;
-                NX_WARNING(typeid(HlsVodSource), "Stream cache is full; '%1' keeps downloading without "
-                    "caching it. Clear the cache to make room.", playlistUrl);
-                remainingBytes = kUnlimited;
-            }
-            else
+                const qint64 start = qint64(part) * kRangePartBytes;
+                if (!httpGet(url, &stop, kSegmentTimeoutUs, &parts[part], &errors[part], start,
+                        start + kRangePartBytes - 1))
+                {
+                    failed[part] = 1;
+                }
+            });
+        }
+
+        for (std::thread& thread: threads)
+            thread.join();
+
+        if (stop.load())
+            return false;
+
+        QByteArray assembled;
+        bool complete = true;
+        for (int part = 0; part < kRangeParts && complete; ++part)
+        {
+            if (failed[part])
             {
-                remainingBytes -= quint64(data.size());
+                // Nothing usable came back: a failure of the first part is reported, of any other one
+                // it means the segment simply ends before that part.
+                if (assembled.isEmpty())
+                {
+                    if (errorOut)
+                        *errorOut = errors[part];
+
+                    return false;
+                }
+
+                break;
+            }
+
+            if (parts[part].size() > kRangePartBytes)
+                return downloadSegment(index, errorOut); //< The server ignored the range.
+
+            assembled += parts[part];
+            if (parts[part].size() < kRangePartBytes)
+                complete = false;
+        }
+
+        // Every part came back full, so the segment may go on past them.
+        if (complete)
+        {
+            qint64 offset = qint64(kRangeParts) * kRangePartBytes;
+            for (int read = 0; read < kRangeReadsMax; ++read)
+            {
+                QByteArray tail;
+                if (!httpGet(url, &stop, kSegmentTimeoutUs, &tail, nullptr, offset, -1)
+                    || tail.isEmpty())
+                {
+                    break; //< Nothing beyond that offset.
+                }
+
+                assembled += tail;
+                if (tail.size() < kRangePartBytes)
+                    break;
+
+                offset += tail.size();
             }
         }
 
-        const QString part = path + ".part";
-        QFile file(part);
-        if (!file.open(QIODevice::WriteOnly))
-            return false;
-
-        const bool written = (file.write(data) == data.size());
-        const bool flushed = written && file.flush();
-        file.close();
-        if (!written || !flushed)
+        if (assembled.isEmpty())
         {
-            QFile::remove(part);
+            if (errorOut)
+                *errorOut = QStringLiteral("no data in the ranged response");
+
             return false;
         }
 
-        if (!QFile::rename(part, path))
-        {
-            QFile::remove(part);
-            return false;
-        }
+        NX_DEBUG(typeid(HlsVodSource), "Segment %1 downloaded in parts: %2 bytes in %3 ms.",
+            index, assembled.size(), QDateTime::currentMSecsSinceEpoch() - startedMs);
 
-        return true;
+        accountCache(quint64(assembled.size()));
+        return writeSegmentFile(path, assembled);
     }
 
     void workerLoop()
@@ -500,7 +633,7 @@ struct HlsVodSource::Private
         bool ok = false;
         for (int attempt = 0; attempt < kSegmentAttempts && !stop.load(); ++attempt)
         {
-            if (downloadSegment(index, &error))
+            if (downloadSegmentParallel(index, &error))
             {
                 ok = true;
                 break;
@@ -723,6 +856,9 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
     d->playlistUrl = playlistUrl;
     d->connections = qBound(1, connections, 32);
 
+    QElapsedTimer timer;
+    timer.start();
+
     // The playlist identifies the cached copy; the URL may carry credentials, so only its digest is
     // used on disk. The playlist and the key are kept next to the segments so that a replay does not
     // need the network at all.
@@ -736,18 +872,26 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
     const QString cachedKeyPath = QDir(d->folder).absoluteFilePath("key.bin");
 
     const QByteArray cachedPlaylist = Private::readCachedFile(cachedPlaylistPath);
-    QByteArray playlistText;
-    if (!httpGet(playlistUrl, &d->stop, kPlaylistTimeoutUs, &playlistText) && cachedPlaylist.isEmpty())
-        return fail("Cannot download the playlist.");
-
+    QByteArray playlistText = cachedPlaylist;
     if (playlistText.isEmpty())
-        playlistText = cachedPlaylist;
+    {
+        // Opening the playlist must not wait for the network when a copy is already cached. A finite
+        // playlist never changes, so the cached copy is as good as a fresh one.
+        if (!httpGet(playlistUrl, &d->stop, kPlaylistTimeoutUs, &playlistText)
+            || playlistText.isEmpty())
+        {
+            return fail("Cannot download the playlist.");
+        }
+
+        Private::writeCachedFile(cachedPlaylistPath, playlistText);
+    }
 
     if (!parsePlaylist(playlistUrl, QString::fromUtf8(playlistText), &d->playlist))
         return fail("Not a supported VOD HLS playlist.");
 
     if (!d->playlist.keyUrl.isEmpty())
     {
+        // The key is cached next to the segments, so a replay needs no network at all.
         QByteArray key = Private::readCachedFile(cachedKeyPath);
         if (key.isEmpty() && !httpGet(d->playlist.keyUrl, &d->stop, kPlaylistTimeoutUs, &key))
             return fail("Cannot download the encryption key.");
@@ -759,30 +903,39 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
         Private::writeCachedFile(cachedKeyPath, key);
     }
 
-    // The playlist text is refreshed on every open (a live-parameter URL may change), and cached for
-    // the case when it cannot be downloaded anymore.
-    if (!playlistText.isEmpty())
-        Private::writeCachedFile(cachedPlaylistPath, playlistText);
-
     // Segments downloaded by an earlier playback are reused as they are.
     d->states.assign(d->playlist.segments.size(), Pending);
     d->attempts.assign(d->playlist.segments.size(), 0);
+
+    // The first segment is what a probe waits for, so it is left to the on-demand ranged download
+    // rather than being shared between the prefetch workers.
+    d->nextIndex = d->playlist.segments.size() > 1 ? 1 : 0;
+    int alreadyCached = 0;
     for (int i = 0; i < d->playlist.segments.size(); ++i)
     {
         const QFileInfo file(d->segmentPath(i));
         if (file.exists() && file.size() > 0)
+        {
             d->states[i] = Ready;
+            ++alreadyCached;
+        }
     }
 
-    const quint64 used = folderSizeBytes(cacheFolder);
-    d->remainingBytes = cacheLimitBytes > 0 && used < quint64(cacheLimitBytes)
-        ? quint64(cacheLimitBytes) - used
-        : Private::kUnlimited;
+    // Measuring the whole cache folder is only worth it when something still has to be downloaded:
+    // the size is what decides whether the limit has been reached.
+    d->remainingBytes = Private::kUnlimited;
+    if (alreadyCached < d->playlist.segments.size() && cacheLimitBytes > 0)
+    {
+        const quint64 used = folderSizeBytes(cacheFolder);
+        d->remainingBytes = used < quint64(cacheLimitBytes)
+            ? quint64(cacheLimitBytes) - used
+            : 0;
+    }
 
-    const int alreadyCached = static_cast<int>(std::count(d->states.cbegin(), d->states.cend(), Ready));
     NX_INFO(typeid(HlsVodSource), "Serving VOD playlist '%1' from %2 with %3 connections: %4 segments, "
-        "%5 already cached.",
-        playlistUrl, d->folder, d->connections, d->playlist.segments.size(), alreadyCached);
+        "%5 already cached, ready in %6 ms.",
+        playlistUrl, d->folder, d->connections, d->playlist.segments.size(), alreadyCached,
+        timer.elapsed());
 
     // The server is created inside its own thread, where it is used; the port it binds is needed to
     // build the playlist it serves.
@@ -863,6 +1016,13 @@ std::shared_ptr<HlsVodSource> HlsVodSource::acquire(
     reg.sources.insert(playlistUrl, source);
     reg.order.append(playlistUrl);
     return source;
+}
+
+bool HlsVodSource::isServing(const QString& playlistUrl)
+{
+    Registry& reg = registry();
+    const std::lock_guard<std::mutex> lock(reg.mutex);
+    return reg.sources.contains(playlistUrl);
 }
 
 void HlsVodSource::stop()

@@ -4,8 +4,11 @@
 
 #include <memory>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QStringList>
+#include <QtCore/QThread>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -219,8 +222,15 @@ bool LocalCameraArchiveDelegate::openStream()
     // time, however fast the network is. A plain file is re-read through the disk cache instead.
     if (!d->hlsSource && switchToPrefetchedPlaylist())
     {
+        QElapsedTimer infoTimer;
+        infoTimer.start();
         if (!readStreamInfo())
             return false;
+
+        NX_INFO(typeid(LocalCameraArchiveDelegate),
+            "Stream info of the prefetched '%1' read in %2 ms; gui thread: %3.",
+            sourceDescription(), infoTimer.elapsed(),
+            QThread::currentThread() == QCoreApplication::instance()->thread());
     }
     else if (!d->cacheReader && switchToCachedInput())
     {
@@ -520,7 +530,21 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist()
     if (!cache || !cache->writable())
         return false;
 
+    // Setting the prefetch up costs network time while the playlist is not cached yet, and the first
+    // segment while the source has never been played. That must not happen on the GUI thread: the
+    // reader thread opens the source too, and it reuses the source set up there.
+    if (QThread::currentThread() == QCoreApplication::instance()->thread()
+        && !HlsVodSource::isServing(d->url))
+    {
+        NX_DEBUG(typeid(LocalCameraArchiveDelegate),
+            "Not prefetching '%1' on the GUI thread: the source is not serving it yet.",
+            sourceDescription());
+        return false;
+    }
+
     QString error;
+    QElapsedTimer timer;
+    timer.start();
     std::shared_ptr<HlsVodSource> source = HlsVodSource::acquire(
         d->url, cache->folder(), cache->limitBytes(), kPrefetchConnections, &error);
     if (!source)
@@ -529,6 +553,8 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist()
             sourceDescription(), error);
         return false;
     }
+
+    const qint64 acquireMs = timer.restart();
 
     // Read the media from the local server instead of the original playlist.
     closeStream();
@@ -559,6 +585,11 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist()
         closeStream();
         return false;
     }
+
+    NX_INFO(typeid(LocalCameraArchiveDelegate),
+        "Prefetched '%1' in %2 ms (source %3 ms, open %4 ms); gui thread: %5.",
+        sourceDescription(), acquireMs + timer.elapsed(), acquireMs, timer.elapsed(),
+        QThread::currentThread() == QCoreApplication::instance()->thread());
 
     return true;
 }
