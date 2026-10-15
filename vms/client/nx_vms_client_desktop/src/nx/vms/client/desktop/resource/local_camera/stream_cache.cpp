@@ -77,8 +77,10 @@ qint64 folderSizeBytes(const QString& path)
         return 0;
 
     qint64 result = 0;
-    for (const QFileInfo& file: folder.entryInfoList(QDir::Files))
-        result += file.size();
+    const QFileInfoList entries =
+        folder.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& entry: entries)
+        result += entry.isDir() ? folderSizeBytes(entry.absoluteFilePath()) : entry.size();
 
     return result;
 }
@@ -788,12 +790,17 @@ void StreamCache::clear()
         return;
 
     const QDir folder(path);
-    for (const QFileInfo& file: folder.entryInfoList(QDir::Files))
+    const QFileInfoList entries =
+        folder.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& entry: entries)
     {
-        if (!QFile::remove(file.absoluteFilePath()))
+        const bool removed = entry.isDir()
+            ? QDir(entry.absoluteFilePath()).removeRecursively()
+            : QFile::remove(entry.absoluteFilePath());
+        if (!removed)
         {
             NX_DEBUG(typeid(StreamCache), "Cannot remove the cached file '%1' yet: it is in use.",
-                file.absoluteFilePath());
+                entry.absoluteFilePath());
         }
     }
 

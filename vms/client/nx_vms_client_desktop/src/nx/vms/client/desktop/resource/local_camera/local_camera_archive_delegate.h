@@ -88,6 +88,12 @@ private:
      * not download it again. Returns false when the source must keep being read directly.
      */
     bool switchToCachedInput();
+    /**
+     * Replaces the input of a finite HLS playlist with a local, parallel-prefetched copy, so that a
+     * server which limits every connection on its own cannot hold playback below real time. Returns
+     * false when the playlist is not one this applies to, and the source keeps being read directly.
+     */
+    bool switchToPrefetchedPlaylist();
     /** Opens the stream with the given FFmpeg options, reporting the reason on failure. */
     bool openUrlWithOptions(const QList<QPair<QString, QString>>& options, QString* errorOut);
     /**

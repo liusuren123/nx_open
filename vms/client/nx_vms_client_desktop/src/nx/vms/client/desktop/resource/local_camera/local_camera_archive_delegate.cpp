@@ -11,6 +11,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
+#include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/time.h>
 }
@@ -23,6 +24,7 @@ extern "C" {
 #include <nx/utils/log/log.h>
 #include <nx/vms/client/desktop/application_context.h>
 
+#include "hls_vod_source.h"
 #include "local_camera_source.h"
 #include "stream_cache.h"
 
@@ -35,6 +37,9 @@ enum class StreamScheme { rtsp, http, rtmp, udp, other };
 
 /** How far before the end of a file a seek to the very end is backed off to. */
 constexpr qint64 kEndSeekBackoffUs = 1'000'000;
+
+/** How many segments of a finite playlist are downloaded at the same time. */
+constexpr int kPrefetchConnections = 8;
 
 StreamScheme schemeOf(const QString& url)
 {
@@ -155,6 +160,12 @@ struct LocalCameraArchiveDelegate::Private
      */
     std::shared_ptr<StreamCacheReader> cacheReader;
 
+    /**
+     * Finite HLS playlist whose segments are downloaded in parallel and served locally. Null for
+     * every source that is read directly. The source itself outlives this handle.
+     */
+    std::shared_ptr<HlsVodSource> hlsSource;
+
     QString lastError;
 };
 
@@ -203,10 +214,15 @@ bool LocalCameraArchiveDelegate::openStream()
     if (!readStreamInfo())
         return false;
 
-    // A source the user expects to be a file is re-read through the disk cache, now that its size and
-    // duration are known. The stream information is read again afterwards, because the state of a
-    // demuxer belongs to the input it was created for.
-    if (!d->cacheReader && switchToCachedInput())
+    // A finite playlist is served from a local copy whose segments are downloaded in parallel: a
+    // server that limits every connection on its own would otherwise keep the playlist below real
+    // time, however fast the network is. A plain file is re-read through the disk cache instead.
+    if (!d->hlsSource && switchToPrefetchedPlaylist())
+    {
+        if (!readStreamInfo())
+            return false;
+    }
+    else if (!d->cacheReader && switchToCachedInput())
     {
         if (!readStreamInfo())
             return false;
@@ -486,6 +502,67 @@ bool LocalCameraArchiveDelegate::openUrl()
     return false;
 }
 
+bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist()
+{
+    // Only an HLS playlist served over plain HTTP is prefetched; anything else is read directly.
+    if (schemeOf(d->url) != StreamScheme::http || !d->formatContext)
+        return false;
+
+    const AVInputFormat* const inputFormat = d->formatContext->iformat;
+    if (!inputFormat || readsResourceDirectly(inputFormat))
+        return false;
+
+    const QString format = QString::fromLatin1(inputFormat->name ? inputFormat->name : "");
+    if (!format.contains(QLatin1String("hls")) && !format.contains(QLatin1String("applehttp")))
+        return false;
+
+    StreamCache* const cache = appContext()->streamCache();
+    if (!cache || !cache->writable())
+        return false;
+
+    QString error;
+    std::shared_ptr<HlsVodSource> source = HlsVodSource::acquire(
+        d->url, cache->folder(), cache->limitBytes(), kPrefetchConnections, &error);
+    if (!source)
+    {
+        NX_DEBUG(typeid(LocalCameraArchiveDelegate), "Not prefetching '%1': %2.",
+            sourceDescription(), error);
+        return false;
+    }
+
+    // Read the media from the local server instead of the original playlist.
+    closeStream();
+    d->hlsSource = source;
+
+    d->formatContext = avformat_alloc_context();
+    if (!d->formatContext)
+    {
+        d->lastError = tr("Failed to allocate an FFmpeg context.");
+        closeStream();
+        return false;
+    }
+
+    d->formatContext->interrupt_callback.callback =
+        &LocalCameraArchiveDelegate::interruptCallback;
+    d->formatContext->interrupt_callback.opaque = this;
+
+    // No read timeout here: a segment may still be downloading when the demuxer asks for it.
+    AVDictionary* options = nullptr;
+    av_dict_set(&options, "user_agent", "NxMetaClient", 0);
+    const int result = avformat_open_input(&d->formatContext,
+        d->hlsSource->url().toUtf8().constData(), /*inputFormat*/ nullptr, &options);
+    av_dict_free(&options);
+
+    if (result < 0)
+    {
+        d->lastError = tr("Failed to open the prefetched stream '%1'.").arg(sourceDescription());
+        closeStream();
+        return false;
+    }
+
+    return true;
+}
+
 bool LocalCameraArchiveDelegate::switchToCachedInput()
 {
     // Only a source the user expects to be a finite file, served over plain HTTP, is worth caching.
@@ -569,6 +646,13 @@ void LocalCameraArchiveDelegate::closeStream()
     d->codecParameters.reset();
     d->audioCodecParameters.reset();
     d->audioLayout.reset();
+
+    if (d->hlsSource)
+    {
+        // Only the handle is released: the source keeps serving the playlist, so that the reader,
+        // which closes and re-opens its delegate when it jumps, does not have to start over.
+        d->hlsSource.reset();
+    }
 
     d->pacingStarted = false;
     d->firstPacketUs = 0;
