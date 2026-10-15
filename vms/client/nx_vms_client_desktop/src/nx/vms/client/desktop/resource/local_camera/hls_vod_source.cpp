@@ -137,6 +137,15 @@ quint64 folderSizeBytes(const QString& path)
     return result;
 }
 
+/** Folder the segments of a playlist are cached in. The URL may carry credentials, so only its
+ * digest is used on disk. */
+QString cacheFolderFor(const QString& cacheFolder, const QString& playlistUrl)
+{
+    const QString digest = QString::fromLatin1(
+        QCryptographicHash::hash(playlistUrl.toUtf8(), QCryptographicHash::Sha1).toHex());
+    return QDir(cacheFolder).absoluteFilePath(QStringLiteral("hls/") + digest);
+}
+
 /**
  * Parses a media playlist. Only what this client is able to replay is accepted; anything else makes
  * the caller fall back to playing the playlist directly, as it did before.
@@ -317,6 +326,10 @@ struct HlsVodSource::Private
     int connections = 1;
     std::atomic<bool> stop{false};
 
+    /** Stream cache the new segments are accounted against. */
+    QString cacheFolderPath;
+    qint64 cacheLimitBytes = 0;
+
     // Segment states, guarded by mutex; shared by the download threads and the local server.
     std::mutex mutex;
     std::condition_variable condition;
@@ -326,6 +339,7 @@ struct HlsVodSource::Private
     int nextIndex = 0;
 
     quint64 remainingBytes = 0;
+    bool cacheBudgetKnown = false;
 
     std::unique_ptr<QTcpServer> server;
     std::thread acceptThread;
@@ -371,6 +385,17 @@ struct HlsVodSource::Private
 
     void accountCache(quint64 bytes)
     {
+        if (!cacheBudgetKnown)
+        {
+            // Measured on the first download rather than when the source is created, so that opening
+            // a playlist does not have to walk the whole cache folder.
+            cacheBudgetKnown = true;
+            const quint64 used = folderSizeBytes(cacheFolderPath);
+            remainingBytes = (cacheLimitBytes > 0 && used < quint64(cacheLimitBytes))
+                ? quint64(cacheLimitBytes) - used
+                : kUnlimited;
+        }
+
         if (remainingBytes == kUnlimited)
             return;
 
@@ -827,6 +852,8 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
     auto d = std::make_unique<Private>();
     d->playlistUrl = playlistUrl;
     d->connections = qBound(1, connections, 32);
+    d->cacheFolderPath = cacheFolder;
+    d->cacheLimitBytes = cacheLimitBytes;
 
     QElapsedTimer timer;
     timer.start();
@@ -834,9 +861,7 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
     // The playlist identifies the cached copy; the URL may carry credentials, so only its digest is
     // used on disk. The playlist and the key are kept next to the segments so that a replay does not
     // need the network at all.
-    const QString digest = QString::fromLatin1(
-        QCryptographicHash::hash(playlistUrl.toUtf8(), QCryptographicHash::Sha1).toHex());
-    d->folder = QDir(cacheFolder).absoluteFilePath(QStringLiteral("hls/") + digest);
+    d->folder = cacheFolderFor(cacheFolder, playlistUrl);
     if (!QDir().mkpath(d->folder))
         return fail("Cannot create the cache folder.");
 
@@ -893,16 +918,9 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
         }
     }
 
-    // Measuring the whole cache folder is only worth it when something still has to be downloaded:
-    // the size is what decides whether the limit has been reached.
-    d->remainingBytes = Private::kUnlimited;
-    if (alreadyCached < d->playlist.segments.size() && cacheLimitBytes > 0)
-    {
-        const quint64 used = folderSizeBytes(cacheFolder);
-        d->remainingBytes = used < quint64(cacheLimitBytes)
-            ? quint64(cacheLimitBytes) - used
-            : 0;
-    }
+    // Measuring the whole cache folder is only worth it when something still has to be downloaded;
+    // the size is also what decides whether the limit has been reached. It is measured on the first
+    // download instead of here, so that creating a source stays cheap.
 
     NX_INFO(typeid(HlsVodSource), "Serving VOD playlist '%1' from %2 with %3 connections: %4 segments, "
         "%5 already cached, ready in %6 ms.",
@@ -995,6 +1013,15 @@ bool HlsVodSource::isServing(const QString& playlistUrl)
     Registry& reg = registry();
     const std::lock_guard<std::mutex> lock(reg.mutex);
     return reg.sources.contains(playlistUrl);
+}
+
+bool HlsVodSource::hasCachedPlaylist(const QString& playlistUrl, const QString& cacheFolder)
+{
+    if (playlistUrl.isEmpty() || cacheFolder.isEmpty())
+        return false;
+
+    return QFile::exists(
+        QDir(cacheFolderFor(cacheFolder, playlistUrl)).absoluteFilePath("playlist.m3u8"));
 }
 
 void HlsVodSource::stop()

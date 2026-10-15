@@ -92,8 +92,12 @@ private:
      * Replaces the input of a finite HLS playlist with a local, parallel-prefetched copy, so that a
      * server which limits every connection on its own cannot hold playback below real time. Returns
      * false when the playlist is not one this applies to, and the source keeps being read directly.
+     *
+     * @param cachedOnly Only use a playlist that is already cached, without touching the network and
+     *     without needing the input to have been opened first. Used to open a playlist that has been
+     *     played before without probing the remote one again.
      */
-    bool switchToPrefetchedPlaylist();
+    bool switchToPrefetchedPlaylist(bool cachedOnly = false);
     /** Opens the stream with the given FFmpeg options, reporting the reason on failure. */
     bool openUrlWithOptions(const QList<QPair<QString, QString>>& options, QString* errorOut);
     /**

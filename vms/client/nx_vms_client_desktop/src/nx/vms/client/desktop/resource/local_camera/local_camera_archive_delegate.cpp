@@ -206,36 +206,39 @@ bool LocalCameraArchiveDelegate::openStream()
 
     if (!d->url.isEmpty())
     {
-        if (!openUrl())
+        // A finite playlist that has already been played is served from its cached copy straight away:
+        // probing the remote playlist again would make opening it wait for the network every time.
+        if (!switchToPrefetchedPlaylist(/*cachedOnly*/ true))
+        {
+            if (!openUrl())
+                return false;
+
+            if (!readStreamInfo())
+                return false;
+
+            // A finite playlist is served from a local copy whose segments are downloaded in parallel:
+            // a server that limits every connection on its own would otherwise keep the playlist below
+            // real time, however fast the network is. A plain file is re-read through the disk cache
+            // instead.
+            if (!d->hlsSource && switchToPrefetchedPlaylist())
+            {
+                if (!readStreamInfo())
+                    return false;
+            }
+            else if (!d->cacheReader && switchToCachedInput())
+            {
+                if (!readStreamInfo())
+                    return false;
+            }
+        }
+        else if (!readStreamInfo())
+        {
             return false;
+        }
     }
     else if (!openCaptureDevice())
     {
         return false;
-    }
-
-    if (!readStreamInfo())
-        return false;
-
-    // A finite playlist is served from a local copy whose segments are downloaded in parallel: a
-    // server that limits every connection on its own would otherwise keep the playlist below real
-    // time, however fast the network is. A plain file is re-read through the disk cache instead.
-    if (!d->hlsSource && switchToPrefetchedPlaylist())
-    {
-        QElapsedTimer infoTimer;
-        infoTimer.start();
-        if (!readStreamInfo())
-            return false;
-
-        NX_INFO(typeid(LocalCameraArchiveDelegate),
-            "Stream info of the prefetched '%1' read in %2 ms; gui thread: %3.",
-            sourceDescription(), infoTimer.elapsed(),
-            QThread::currentThread() == QCoreApplication::instance()->thread());
-    }
-    else if (!d->cacheReader && switchToCachedInput())
-    {
-        if (!readStreamInfo())
-            return false;
     }
 
     d->videoStreamIndex = av_find_best_stream(
@@ -512,28 +515,50 @@ bool LocalCameraArchiveDelegate::openUrl()
     return false;
 }
 
-bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist()
+bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
 {
     // Only an HLS playlist served over plain HTTP is prefetched; anything else is read directly.
-    if (schemeOf(d->url) != StreamScheme::http || !d->formatContext)
+    if (schemeOf(d->url) != StreamScheme::http)
         return false;
 
-    const AVInputFormat* const inputFormat = d->formatContext->iformat;
-    if (!inputFormat || readsResourceDirectly(inputFormat))
+    if (cachedOnly && !d->filePlaybackExpected)
         return false;
 
-    const QString format = QString::fromLatin1(inputFormat->name ? inputFormat->name : "");
-    if (!format.contains(QLatin1String("hls")) && !format.contains(QLatin1String("applehttp")))
-        return false;
+    if (d->formatContext)
+    {
+        // The remote input has been opened already, so the demuxer tells what this source is.
+        const AVInputFormat* const inputFormat = d->formatContext->iformat;
+        if (!inputFormat || readsResourceDirectly(inputFormat))
+            return false;
+
+        const QString format = QString::fromLatin1(inputFormat->name ? inputFormat->name : "");
+        if (!format.contains(QLatin1String("hls")) && !format.contains(QLatin1String("applehttp")))
+            return false;
+    }
+    else if (!cachedOnly)
+    {
+        return false; //< Nothing has been opened yet, so nothing tells an HLS playlist here.
+    }
 
     StreamCache* const cache = appContext()->streamCache();
-    if (!cache || !cache->writable())
+    if (!cache)
         return false;
+
+    if (cachedOnly)
+    {
+        // Nothing is fetched here, so the cached playlist is all that is needed.
+        if (!HlsVodSource::hasCachedPlaylist(d->url, cache->folder()))
+            return false;
+    }
+    else if (!cache->writable())
+    {
+        return false;
+    }
 
     // Setting the prefetch up costs network time while the playlist is not cached yet, and the first
     // segment while the source has never been played. That must not happen on the GUI thread: the
     // reader thread opens the source too, and it reuses the source set up there.
-    if (QThread::currentThread() == QCoreApplication::instance()->thread()
+    if (!cachedOnly && QThread::currentThread() == QCoreApplication::instance()->thread()
         && !HlsVodSource::isServing(d->url))
     {
         NX_DEBUG(typeid(LocalCameraArchiveDelegate),

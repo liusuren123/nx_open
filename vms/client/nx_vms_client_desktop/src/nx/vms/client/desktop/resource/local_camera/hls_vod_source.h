@@ -71,6 +71,12 @@ public:
     /** Whether a source is already serving the given playlist; the registry is cheap to consult. */
     static bool isServing(const QString& playlistUrl);
 
+    /**
+     * Whether the playlist has already been downloaded and cached, so that it can be served without
+     * touching the network at all.
+     */
+    static bool hasCachedPlaylist(const QString& playlistUrl, const QString& cacheFolder);
+
     /** Folder the segments are cached in. */
     QString cacheFolder() const;
 
