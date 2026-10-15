@@ -23,6 +23,7 @@
 #include <core/resource/camera_history.h>
 #include <core/resource/camera_resource.h>
 #include <core/resource/device_dependent_strings.h>
+#include <core/resource/media_resource.h>
 #include <core/resource/media_server_resource.h>
 #include <core/resource/storage_resource.h>
 #include <core/resource_management/resource_pool.h>
@@ -1387,6 +1388,7 @@ void QnWorkbenchNavigator::updateCurrentWidget()
 
     m_pausedOverride = false;
     m_currentWidgetLoaded = false;
+    m_localFileRangeFittedMs = -1;
 
     initializePositionAnimations();
 
@@ -1758,6 +1760,27 @@ void QnWorkbenchNavigator::updateSliderFromReader(UpdateSliderMode mode)
 
     NX_TRACE(this, "Updating slider from reader. IsLiveSuppored: %1", isLiveSupportedInReader);
     m_timeSlider->setTimeRange(milliseconds(startTimeMSec), milliseconds(endTimeMSec));
+
+    // A client-side source with a finite duration (a local file, or a file streamed over the
+    // network, such as a VOD playlist) has neither a growing archive nor a live edge, so show its
+    // whole length at once. A live stream reports no local file range and is left as is. Fitting is
+    // done only when the length is first learned, so that the user can zoom in and pan freely
+    // afterwards.
+    if (const auto mediaResource =
+        m_currentMediaWidget->resource().dynamicCast<QnMediaResource>())
+    {
+        if (mediaResource->localFileRangeUs().has_value()
+            && endTimeMSec > startTimeMSec
+            && endTimeMSec != m_localFileRangeFittedMs)
+        {
+            m_localFileRangeFittedMs = endTimeMSec;
+            NX_INFO(this, "Fitting the timeline window to the whole %1 s long local file source.",
+                (endTimeMSec - startTimeMSec) / 1000);
+            m_timeSlider->finishAnimations();
+            m_timeSlider->setWindow(m_timeSlider->minimum(), m_timeSlider->maximum(),
+                /*animate*/ false, /*forceResize*/ true);
+        }
+    }
 
     if (m_calendar)
     {

@@ -334,6 +334,9 @@ private:
     bool m_sliderWindowInvalid = false;
     bool m_timelineWindowIsNearLive = false;
 
+    /** End of the range of a client-side file source which has already been shown in full. */
+    qint64 m_localFileRangeFittedMs = -1;
+
     bool m_updatingCalendarFromSlider = false;
     bool m_updatingSliderFromReader = false;
     bool m_updatingSliderFromScrollBar = false;
