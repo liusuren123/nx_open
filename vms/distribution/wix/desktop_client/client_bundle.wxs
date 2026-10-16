@@ -20,6 +20,34 @@
             Value="[ProgramFiles64Folder]\${windowsInstallPath}\${customization.vmsName}"
             bal:Overridable="yes" />
 
+        <!-- Offer the folder a previous installation used rather than resetting to the default one on
+             every install and upgrade. The MSI records the folder it was installed into (the
+             InstallLocation value the client feature writes under HKLM), which is the only place it
+             can be read from.
+
+             Two searches are needed because a value search that finds nothing clears its variable,
+             which would take the default above with it: the existence search gates the value search.
+             Their ids are not free-form: the searches are evaluated in the order of their ids, so
+             "...Exists" has to sort before "...Value". -->
+        <util:RegistrySearch
+            Id="InstallFolderExists"
+            Variable="PreviousInstallFolderExists"
+            Result="exists"
+            Root="HKLM"
+            Key="${client_registry_path}"
+            Value="InstallLocation"
+            Win64="yes" />
+
+        <util:RegistrySearch
+            Id="InstallFolderValue"
+            Variable="InstallFolder"
+            Result="value"
+            Root="HKLM"
+            Key="${client_registry_path}"
+            Value="InstallLocation"
+            Win64="yes"
+            Condition="PreviousInstallFolderExists" />
+
         <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.HyperlinkLicense">
             <Payload SourceFile="${customization_dir}/license.html" />
             <Payload SourceFile="${customization_dir}/icons/windows/installer_bg.png" />
