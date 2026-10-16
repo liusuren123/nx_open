@@ -144,6 +144,7 @@ nxoptx://addStream?playlist=My%20list&url=rtsp%3A%2F%2F192.168.1.50%3A554%2Fstre
 * 请求在客户端主线程里执行，加入很大的文件夹会短暂占用界面线程。
 * `addFile` 会过滤不支持的文件；一个都没加进去时返回 `noFilesFound`。
 * 密码不会出现在日志里；`listPlaylists` 也不返回密码。
-* `nxoptx://` 处理器注册的是**当前 exe 的绝对路径**。开发构建里 exe 依赖 `activate_run.bat`
-  设置的 PATH 才能加载 Qt DLL，直接从 shell 打开 URI 会因为没有 DLL 而静默失败；
-  正常安装版把依赖放在 exe 旁边，不受影响。这种开发环境下请直接用套接字调用。
+* `nxoptx://` 处理器注册的是**当前 exe 的绝对路径**。正常安装版依赖就在 exe 旁边；
+  开发构建把 Qt 放在 `.conan_short` 之类的目录里、只有 `activate_run.bat` 设过 PATH 才能加载，
+  这种情况下注册的命令会自动变成 `cmd.exe /c set "PATH=<Qt 目录>;%PATH%" && ...`，
+  每次启动都会重新检查并写入，所以手动设置过 PATH 之后不需要额外操作。

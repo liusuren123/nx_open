@@ -10,6 +10,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonParseError>
+#include <QtCore/QLibraryInfo>
 #include <QtCore/QSettings>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -469,16 +470,52 @@ std::optional<QJsonObject> sendRequest(const QJsonObject& request, int timeoutMs
     }
 }
 
+namespace {
+
+/**
+ * Directory a shell has to add to PATH for this executable to be able to start, or an empty string
+ * when the executable can start on its own.
+ *
+ * A normal installation keeps its dependencies (Qt among them) next to the executable. Development
+ * builds keep Qt in an external package that is only reachable through PATH, and a process started
+ * by the shell as the URI handler does not have that PATH at all, so the directory Qt was loaded
+ * from has to be added explicitly; without it the executable fails to load its DLLs.
+ */
+QString dependencySearchDirectory()
+{
+#if defined(Q_OS_WIN)
+    const QDir applicationDirectory(QCoreApplication::applicationDirPath());
+    if (!applicationDirectory.entryList({QStringLiteral("Qt6Core*.dll")}, QDir::Files).isEmpty())
+        return {};
+
+    // Empty for the debug build of Qt, which ships the same DLLs with a different name.
+    const QString qtBinaries = QLibraryInfo::path(QLibraryInfo::BinariesPath);
+    return QDir(qtBinaries).exists() ? QDir::toNativeSeparators(qtBinaries) : QString();
+#else
+    return {};
+#endif
+}
+
+} // namespace
+
 bool registerUriHandler()
 {
 #if defined(Q_OS_WIN)
     const QString executable = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
-    // The placeholder is kept verbatim; the shell replaces it with the URI being opened.
-    const QString command = QStringLiteral("\"%1\" --%2 \"%3\"")
-        .arg(executable, QLatin1String(kScheme), QStringLiteral("%1"));
+    const QString scheme = QLatin1String(kScheme);
+
+    // The `%1` placeholder is kept verbatim: the shell replaces it with the URI being opened, and
+    // the `set` before it expands `%PATH%` from its own environment.
+    const QString searchDirectory = dependencySearchDirectory();
+    const QString command = searchDirectory.isEmpty()
+        ? QStringLiteral("\"") + executable + QStringLiteral("\" --") + scheme
+            + QStringLiteral(" \"%1\"")
+        : QStringLiteral("cmd.exe /c set \"PATH=") + searchDirectory
+            + QStringLiteral(";%PATH%\" && \"") + executable + QStringLiteral("\" --") + scheme
+            + QStringLiteral(" \"%1\"");
 
     QSettings registry(QStringLiteral("HKEY_CURRENT_USER\\Software\\Classes\\%1")
-        .arg(QLatin1String(kScheme)), QSettings::NativeFormat);
+        .arg(scheme), QSettings::NativeFormat);
 
     if (registry.value(QStringLiteral("command")).toString() == command)
         return true;
@@ -493,13 +530,18 @@ bool registerUriHandler()
     const bool registered = registry.status() == QSettings::NoError;
     if (registered)
     {
-        NX_INFO(kLogTag, "Registered the %1:// URI handler for this user.",
-            QLatin1String(kScheme));
+        NX_INFO(kLogTag, "Registered the %1:// URI handler.", scheme);
+        if (!searchDirectory.isEmpty())
+        {
+            NX_INFO(kLogTag, "The dependencies of this build are not next to the executable, so "
+                "the handler adds '%1' to PATH. A regular installation does not need this.",
+                searchDirectory);
+        }
     }
     else
     {
         NX_WARNING(kLogTag, "Could not register the %1:// URI handler (error %2).",
-            QLatin1String(kScheme), int(registry.status()));
+            scheme, int(registry.status()));
     }
     return registered;
 #else
