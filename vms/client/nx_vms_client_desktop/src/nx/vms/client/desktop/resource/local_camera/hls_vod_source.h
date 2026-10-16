@@ -78,6 +78,15 @@ public:
     static bool hasCachedPlaylist(const QString& playlistUrl, const QString& cacheFolder);
 
     /**
+     * Whole duration of the playlist, in microseconds, or 0 when it is not a finite playlist this
+     * source can serve.
+     *
+     * Read from the playlist alone: the media itself is not needed, so a timeline can be right before
+     * any of it has been downloaded. The playlist is cached, so a source created afterwards reuses it.
+     */
+    static qint64 playlistDurationUs(const QString& playlistUrl, const QString& cacheFolder);
+
+    /**
      * Whether the media a demuxer needs to identify the streams is already cached, so that opening the
      * playlist does not have to wait for a download.
      */

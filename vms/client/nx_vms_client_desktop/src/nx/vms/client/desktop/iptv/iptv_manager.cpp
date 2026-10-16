@@ -585,9 +585,16 @@ QnResourcePtr IptvManager::ensureStreamResource(const LocalCameraSource& source)
     if (!pool)
         return {};
 
-    // A resource is created on demand and kept, so re-opening a stream is cheap.
+    // A resource is created on demand and kept, so re-opening a stream is cheap. It is told what the
+    // stream turned out to be once more, though: one that was opened while its playlist could not be
+    // read yet is a live stream until it is opened again and turns out to be a file with a length.
     if (const QnResourcePtr existing = pool->getResourceById(source.id))
+    {
+        if (const auto localCamera = existing.dynamicCast<LocalCameraResource>())
+            localCamera->updateFromSource(source);
+
         return existing;
+    }
 
     QnResourcePtr resource(new LocalCameraResource(source));
     pool->addResources(QnResourceList{resource});

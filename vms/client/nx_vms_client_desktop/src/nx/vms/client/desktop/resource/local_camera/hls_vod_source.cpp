@@ -1190,6 +1190,45 @@ bool HlsVodSource::hasCachedPlaylist(const QString& playlistUrl, const QString& 
         QDir(cacheFolderFor(cacheFolder, playlistUrl)).absoluteFilePath("playlist.m3u8"));
 }
 
+qint64 HlsVodSource::playlistDurationUs(const QString& playlistUrl, const QString& cacheFolder)
+{
+    // Only a playlist is read here: the length of any other source can only be found by fetching its
+    // media, which is what the caller has a probe of its own for.
+    if (playlistUrl.isEmpty() || cacheFolder.isEmpty()
+        || !playlistUrl.contains(QLatin1String(".m3u8"), Qt::CaseInsensitive))
+    {
+        return 0;
+    }
+
+    const QString folder = cacheFolderFor(cacheFolder, playlistUrl);
+    const QString path = QDir(folder).absoluteFilePath("playlist.m3u8");
+
+    // The playlist is small, and the copy on disk is written here when there is none, so that a source
+    // created for the same playlist afterwards reads it rather than fetching it again.
+    QByteArray text = Private::readCachedFile(path);
+    if (text.isEmpty())
+    {
+        if (!QDir().mkpath(folder))
+            return 0;
+
+        std::atomic<bool> stop{false};
+        if (!httpGet(playlistUrl, &stop, kPlaylistTimeoutUs, &text) || text.isEmpty())
+            return 0;
+
+        Private::writeCachedFile(path, text);
+    }
+
+    Playlist playlist;
+    if (!parsePlaylist(playlistUrl, QString::fromUtf8(text), &playlist))
+        return 0;
+
+    double seconds = 0.0;
+    for (const Segment& segment: playlist.segments)
+        seconds += segment.duration;
+
+    return qint64(seconds * 1'000'000.0);
+}
+
 bool HlsVodSource::isProbeReady(const QString& playlistUrl, const QString& cacheFolder)
 {
     if (playlistUrl.isEmpty() || cacheFolder.isEmpty())

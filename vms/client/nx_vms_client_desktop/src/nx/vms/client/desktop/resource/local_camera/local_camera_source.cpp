@@ -4,7 +4,11 @@
 
 #include <QtCore/QUrl>
 
+#include <nx/vms/client/desktop/application_context.h>
+
+#include "hls_vod_source.h"
 #include "local_camera_archive_delegate.h"
+#include "stream_cache.h"
 
 namespace nx::vms::client::desktop {
 
@@ -76,12 +80,27 @@ void classifyLocalCameraSource(LocalCameraSource& source)
     source.seekableFile = false;
     source.durationUs = 0;
 
-    const QString scheme = QUrl(source.streamUrl()).scheme().toLower();
+    const QString url = source.streamUrl();
+    const QString scheme = QUrl(url).scheme().toLower();
     if (scheme != "http" && scheme != "https")
         return;
 
-    LocalCameraArchiveDelegate probe(QString(), source.streamUrl(),
-        /*filePlaybackExpected*/ true);
+    // A finite playlist states the length of the whole media itself, so the timeline can be right as
+    // soon as the playlist has been read - which is long before any of the media has been downloaded.
+    // Waiting for the media instead is what left an item a live stream, without a length, until it had
+    // been played once.
+    if (StreamCache* const cache = appContext()->streamCache())
+    {
+        const qint64 durationUs = HlsVodSource::playlistDurationUs(url, cache->folder());
+        if (durationUs > 0)
+        {
+            source.seekableFile = true;
+            source.durationUs = durationUs;
+            return;
+        }
+    }
+
+    LocalCameraArchiveDelegate probe(QString(), url, /*filePlaybackExpected*/ true);
     if (!probe.open(QnResourcePtr()) || !probe.isFilePlayback())
     {
         probe.close();
