@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <future>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -59,6 +60,13 @@ constexpr int kAcceptPollMs = 500;
  */
 constexpr int kRangeParts = 4;
 constexpr qint64 kRangePartBytes = 768 * 1024;
+
+/**
+ * How long a client waits for a segment another download of this source is already fetching before
+ * it starts a copy of its own. The copy on its way is as good as the one that would be started, and
+ * fetching a second one only splits the connection the server grants between the two.
+ */
+constexpr auto kOnDemandWait = std::chrono::milliseconds(20'000);
 
 /** Upper bound of a ranged segment download; a segment is minutes of video at most. */
 constexpr int kRangeReadsMax = 64;
@@ -342,6 +350,16 @@ struct HlsVodSource::Private
     std::set<int> priority;
     int nextIndex = 0;
 
+    /** Segment index to number of fast ranged downloads of it that are running right now. */
+    std::map<int, int> onDemand;
+
+    /**
+     * Cleared once the server has shown that a ranged request is not worth making: a truncated answer
+     * or one that ignores the range makes the client pay for a whole round of connections that ends
+     * up being thrown away.
+     */
+    std::atomic<bool> rangesUsable{true};
+
     quint64 remainingBytes = 0;
     bool cacheBudgetKnown = false;
 
@@ -482,6 +500,11 @@ struct HlsVodSource::Private
         if (QFile::exists(path))
             return true;
 
+        // This server has already answered the question: asking for a range again would only cost
+        // another round of connections before the segment is fetched plainly.
+        if (!rangesUsable.load())
+            return downloadSegment(index, errorOut);
+
         const QString url = playlist.segments[index].url;
         const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
 
@@ -516,16 +539,21 @@ struct HlsVodSource::Private
         {
             if (failed[part])
             {
-                // Nothing usable came back: a ranged request may be refused, and a plain one still
-                // gets the segment, just slower.
-                if (assembled.isEmpty())
-                    return downloadSegment(index, errorOut);
+                // A part did not come back, so the rest of the segment cannot be assembled from what
+                // is here - and half of a segment must never be written as if it were whole, or the
+                // demuxer would try to read it and fail. One plain request still gets all of it.
+                if (part == 0)
+                    rangesUsable = false; //< Nothing came back at all.
 
-                break;
+                return downloadSegment(index, errorOut);
             }
 
             if (parts[part].size() > kRangePartBytes)
-                return downloadSegment(index, errorOut); //< The server ignored the range.
+            {
+                // The server ignored the range and answered with the whole segment.
+                rangesUsable = false;
+                return downloadSegment(index, errorOut);
+            }
 
             assembled += parts[part];
             if (parts[part].size() < kRangePartBytes)
@@ -630,33 +658,73 @@ struct HlsVodSource::Private
     }
 
     /**
-     * Makes the segment available for a client.
+     * Makes a segment available, fetching it with the fast ranged path.
      *
      * It is downloaded right here instead of being waited for: a worker fetches over a single
      * connection, which takes tens of seconds on a server that limits connections, and every other
      * request would be stuck behind that wait since one connection is served at a time.
+     *
+     * Called when a client asks for a segment and, for the first one, as soon as the source is
+     * created: it is what a probe waits for and what the interface waits for to prepare the timeline,
+     * so it must not wait for playback to reach it.
      */
     bool ensureSegment(int index)
     {
         if (QFile::exists(segmentPath(index)))
             return true;
 
+        // A download of the same segment may already be on its way, started for a client or for the
+        // first segment. Waiting for that copy gets the segment just as early, while starting a
+        // second one would only split the connection the server grants between the two.
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            if (onDemand.count(index))
+            {
+                condition.wait_for(lock, kOnDemandWait, [&]
+                {
+                    return !onDemand.count(index) || stop.load();
+                });
+
+                if (QFile::exists(segmentPath(index)))
+                    return true;
+            }
+
+            ++onDemand[index];
+        }
+
         QString error;
+        bool ready = false;
         for (int attempt = 0; attempt < kSegmentAttempts && !stop.load(); ++attempt)
         {
             if (downloadSegmentParallel(index, &error))
             {
-                const std::lock_guard<std::mutex> lock(mutex);
-                states[index] = Ready;
-                return true;
+                ready = true;
+                break;
             }
 
             std::this_thread::sleep_for(kSegmentRetryBaseDelay * (1 << attempt));
         }
 
-        NX_WARNING(typeid(HlsVodSource), "Cannot serve segment %1 of '%2': %3.",
-            index, playlistUrl, error);
-        return false;
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            const auto it = onDemand.find(index);
+            if (it != onDemand.end() && --it->second <= 0)
+                onDemand.erase(it);
+
+            if (ready)
+                states[index] = Ready;
+            else if (states[index] != Ready)
+                states[index] = Pending; //< A worker may still fetch it.
+        }
+        condition.notify_all();
+
+        if (!ready)
+        {
+            NX_WARNING(typeid(HlsVodSource), "Cannot serve segment %1 of '%2': %3.",
+                index, playlistUrl, error);
+        }
+
+        return ready;
     }
 
     static bool readRequest(QTcpSocket* socket, QString* path)
@@ -921,8 +989,10 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
     d->states.assign(d->playlist.segments.size(), Pending);
     d->attempts.assign(d->playlist.segments.size(), 0);
 
-    // The first segment is what a probe waits for, so it is left to the on-demand ranged download
-    // rather than being shared between the prefetch workers.
+    // The first segment is fetched by a thread of its own, with the fast ranged path (see below), so
+    // the prefetch workers start at the second one. The first is what the demuxer needs to identify
+    // the streams and what the interface waits for to prepare the timeline; sharing it with them
+    // would make those wait for a single connection.
     d->nextIndex = d->playlist.segments.size() > 1 ? 1 : 0;
     int alreadyCached = 0;
     for (int i = 0; i < d->playlist.segments.size(); ++i)
@@ -969,13 +1039,25 @@ std::unique_ptr<HlsVodSource> HlsVodSource::create(
         d->workers.emplace_back([raw = d.get()]() { raw->workerLoop(); });
     }
 
+    // The first segment is fetched the fast way right away instead of when a client asks for it: the
+    // interface waits for it to prepare the timeline and the thumbnails of the item, and it would
+    // never arrive if that wait had to be preceded by a playback. It is joined like a worker.
+    d->workers.emplace_back([raw = d.get()]() { raw->ensureSegment(0); });
+
     return std::unique_ptr<HlsVodSource>(new HlsVodSource(std::move(d)));
 }
 
 namespace {
 
-/** Sources are kept alive after their playback ends; only so many playlists are remembered. */
-constexpr int kMaxTrackedSources = 4;
+/**
+ * Sources are kept alive after their playback ends; only so many playlists are remembered.
+ *
+ * A playlist of a few items is prepared ahead of playback, and every source that is dropped while
+ * its downloads are still running has those downloads aborted and has to start over, so the limit has
+ * to be generous enough for a whole playlist not to evict itself over and over. A source a playback
+ * holds is never dropped, whatever the limit is.
+ */
+constexpr int kMaxTrackedSources = 16;
 
 struct Registry
 {
