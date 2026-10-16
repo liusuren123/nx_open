@@ -78,6 +78,7 @@
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/opengl/opengl_renderer.h>
 #include <nx/vms/client/desktop/resource/layout_resource_helpers.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_resource.h>
 #include <nx/vms/client/desktop/resource/resource_access_manager.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
 #include <nx/vms/client/desktop/resource_properties/camera/camera_settings_tab.h>
@@ -3590,6 +3591,14 @@ bool QnMediaResourceWidget::hasAudio() const
 
     if (d->mediaResource) // Handle local files.
     {
+        // A client-side source (a local capture device or a stream URL) only reveals whether it
+        // carries audio once it starts playing, which happens after the interface has to decide
+        // whether audio may be played at all. Such a source is therefore assumed to carry audio: the
+        // display plays nothing when it turns out to have none, while treating it as silent would
+        // leave a source that does have audio silent for good.
+        if (d->mediaResource.dynamicCast<LocalCameraResource>())
+            return true;
+
         if (auto audioLayout = d->mediaResource->getAudioLayout(d->display()->dataProvider()))
             return !audioLayout->tracks().empty();
     }
