@@ -2,6 +2,9 @@
 
 #include "audio_stream_display.h"
 
+#include <atomic>
+#include <cmath>
+
 #include <nx/audio/audiodevice.h>
 #include <nx/media/audio/processor.h>
 #include <nx/media/config.h>
@@ -16,7 +19,44 @@ using namespace nx::vms::client::desktop;
 
 namespace {
 static const int AVCODEC_MAX_AUDIO_FRAME_SIZE = 192 * 1000;
+
+// Peak level of a decoded buffer in dBFS, used to report the loudness of the audio being played.
+QString audioLevelDb(const void* data, int size, const nx::media::audio::Format& format)
+{
+    const int bytesPerSample = format.sampleSize / 8;
+    if (bytesPerSample <= 0 || size < bytesPerSample)
+        return QStringLiteral("no-data");
+
+    const int sampleCount = size / bytesPerSample;
+    double peak = 0.0;
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        double value = 0.0;
+        switch (format.sampleSize)
+        {
+            case 8:
+                value = (double(reinterpret_cast<const quint8*>(data)[i]) - 128.0) / 128.0;
+                break;
+            case 16:
+                value = double(reinterpret_cast<const qint16*>(data)[i]) / 32768.0;
+                break;
+            case 32:
+                if (format.sampleType == nx::media::audio::Format::SampleType::floatingPoint)
+                    value = double(reinterpret_cast<const float*>(data)[i]);
+                else
+                    value = double(reinterpret_cast<const qint32*>(data)[i]) / 2147483648.0;
+                break;
+            default:
+                return QStringLiteral("unknown-format");
+        }
+        peak = qMax(peak, qAbs(value));
+    }
+
+    if (peak <= 0.0)
+        return QStringLiteral("-inf dBFS (silence)");
+    return QString::number(20.0 * std::log10(peak), 'f', 1) + " dBFS";
 }
+} // namespace
 
 QnAudioStreamDisplay::QnAudioStreamDisplay(
     int bufferMs,
@@ -341,6 +381,22 @@ void QnAudioStreamDisplay::playCurrentBuffer()
             else if (m_suspended)
                 m_sound->suspend();
 
+        }
+
+        // Log the level of what is actually handed to the sound device, so that the presence of
+        // sound can be checked from the log rather than by ear.
+        {
+            static std::atomic<int> levelCounter{0};
+            const int n = levelCounter.fetch_add(1);
+            if (n % 200 == 0)
+            {
+                NX_DEBUG(this, "Audio #%1 ts=%2 bytes=%3 sound=%4 muted=%5 format=[%6] level=%7",
+                    n, qlonglong(data->timestamp), int(m_decodedAudioBuffer.size()),
+                    m_sound ? 1 : 0, int(decodeMode() == AudioDecodeMode::spectrumOnly),
+                    audioFormat.toString(),
+                    audioLevelDb(m_decodedAudioBuffer.data(), int(m_decodedAudioBuffer.size()),
+                        audioFormat));
+            }
         }
 
         if (m_sound)
