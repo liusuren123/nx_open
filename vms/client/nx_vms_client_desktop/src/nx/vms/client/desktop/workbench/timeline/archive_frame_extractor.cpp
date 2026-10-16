@@ -82,6 +82,12 @@ struct ArchiveFrameExtractor::Private
 
         std::deque<Request> requestQueue;
 
+        /**
+         * Resource the delegate has to be opened with, when that is up to this class rather than to
+         * the delegate itself. Opened by the stream worker; null once that has been done.
+         */
+        QnMediaResourcePtr resourceToOpen;
+
         std::unique_ptr<QnAbstractArchiveDelegate> archiveDelegate;
         QnCompressedVideoDataPtr currentFrame;
 
@@ -124,6 +130,12 @@ struct ArchiveFrameExtractor::Private
 
     void processRequests()
     {
+        if (!streamWorker.resourceToOpen.isNull())
+        {
+            streamWorker.archiveDelegate->open(streamWorker.resourceToOpen);
+            streamWorker.resourceToOpen.reset();
+        }
+
         while (true)
         {
             std::unique_lock<std::mutex> lock(streamWorker.mutex);
@@ -403,7 +415,9 @@ ArchiveFrameExtractor::ArchiveFrameExtractor(
     if (!d->streamWorker.archiveDelegate->getFlags().testFlag(
         QnAbstractArchiveDelegate::Flag_CanSeekImmediatly))
     {
-        d->streamWorker.archiveDelegate->open(mediaResource);
+        // Opening may have to fetch the media, so it is left to the stream worker: the interface is
+        // not held up by it, and the frames appear once the source is open.
+        d->streamWorker.resourceToOpen = mediaResource;
     }
 
     d->streamWorker.thread = std::make_unique<std::thread>(&Private::processRequests, d.get());
@@ -413,6 +427,11 @@ ArchiveFrameExtractor::ArchiveFrameExtractor(
 ArchiveFrameExtractor::~ArchiveFrameExtractor()
 {
     d->stop.store(true);
+
+    // The stream worker may be inside a long open() of its own, so it is asked to give up before it is
+    // waited for.
+    if (d->streamWorker.archiveDelegate)
+        d->streamWorker.archiveDelegate->pleaseStop();
 
     d->streamWorker.cv.notify_one();
     d->decodeWorker.cv.notify_one();

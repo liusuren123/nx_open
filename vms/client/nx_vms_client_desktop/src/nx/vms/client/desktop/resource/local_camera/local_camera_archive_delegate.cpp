@@ -600,25 +600,17 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
         return false;
     }
 
-    // The interface must not wait for the network, and it is served locally only when what a demuxer
-    // needs to open the playlist is already cached. A short wait is allowed, though: that part is
-    // being downloaded right now by the background preparation, and failing here would leave the item
-    // without its timeline and thumbnails until it is opened again.
-    if (QThread::currentThread() == QCoreApplication::instance()->thread())
+    // The interface is never made to wait for the download: it is served locally only when what a
+    // demuxer needs to open the playlist is already cached, and otherwise the media is prepared in
+    // the background and the caller is told to come back. Whoever can afford to fetch it - the reader
+    // thread, the one that plays - opens the source directly instead.
+    if (QThread::currentThread() == QCoreApplication::instance()->thread()
+        && !HlsVodSource::isProbeReady(d->url, cache->folder()))
     {
-        for (int attempt = 0; attempt < 15 && !m_needStop
-            && !HlsVodSource::isProbeReady(d->url, cache->folder()); ++attempt)
-        {
-            QThread::msleep(200);
-        }
-
-        if (!HlsVodSource::isProbeReady(d->url, cache->folder()))
-        {
-            NX_DEBUG(typeid(LocalCameraArchiveDelegate),
-                "Not prefetching '%1' on the GUI thread: the beginning of the media is not cached "
-                "yet.", sourceDescription());
-            return false;
-        }
+        NX_DEBUG(typeid(LocalCameraArchiveDelegate),
+            "Not prefetching '%1' on the GUI thread: the beginning of the media is not cached yet.",
+            sourceDescription());
+        return false;
     }
 
     QString error;
