@@ -5,9 +5,31 @@
 
 ## 安装
 
-1. 打开 `chrome://extensions/`；
-2. 右上角打开「开发者模式」；
-3. 点「加载已解压的扩展程序」，选择本目录（`nxoptx-chrome-extension`）。
+两种方式，任选一种（Chrome 的「加载已解压的扩展程序」需要一个**文件夹**）：
+
+**A. 从 zip 安装（推荐）**
+
+1. 解压 `nxoptx-chrome-extension.zip` 到一个**长期保留**的目录，例如
+   `D:\tools\nxoptx-chrome-extension`（Chrome 会记住这个路径，别放在会被清理的地方）；
+2. 打开 `chrome://extensions/`，右上角打开「开发者模式」；
+3. 点「加载已解压的扩展程序」，选择解压出来的 `nxoptx-chrome-extension` 目录。
+
+**B. 直接用仓库里的源码目录**
+
+直接选本目录（`vms/client/nx_vms_client_desktop/nxoptx-chrome-extension`）即可，省一步解压，
+但仓库目录一旦移动或重新 clone，扩展就会失效（报「无法加载」），需要重新选一次目录。
+
+**C. 重新打包**
+
+改完源码后重新生成 zip：
+
+```
+python package.py --out <输出路径>.zip
+```
+
+> 不建议用 `.crx`：当前 Chrome 只允许从官方商店安装 crx，本地拖入会被拒绝，
+> 所以「加载已解压的扩展程序」是自用/内测唯一可靠的方式。另外开发者模式的扩展在每次
+> 启动浏览器时会有一次提示，可以忽略。
 
 ## 工作原理
 
@@ -100,4 +122,5 @@ nxoptx://addStream?url=<URL 编码的流地址>&name=<URL 编码的名称>&playl
 | `content.js` | 内容脚本：右下角面板、DOM 扫描、构造 `nxoptx://` 命令 |
 | `panel.css` | 面板样式（注入 Shadow DOM） |
 | `popup.html` / `popup.js` / `popup.css` | 工具栏弹窗与设置 |
+| `package.py` | 把扩展打成 `nxoptx-chrome-extension.zip`（单层目录，解压即用） |
 | `make_icons.py` | 重新生成 `icons/` 里的图标（需要 Pillow） |

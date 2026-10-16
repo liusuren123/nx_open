@@ -54,7 +54,11 @@
     host.id = 'nxoptx-host';
     const shadow = host.attachShadow({mode: 'open'});
 
-    const style = document.createElement('style');
+    // A link to the packaged stylesheet rather than a fetch, so the shadow root is themed without
+    // depending on the page's request rules. panel.css is listed in web_accessible_resources.
+    const style = document.createElement('link');
+    style.rel = 'stylesheet';
+    style.href = chrome.runtime.getURL('panel.css');
     shadow.append(style);
 
     const root = document.createElement('div');
@@ -350,16 +354,6 @@
     });
 
     // ---------------------------------------------------------------- wiring
-
-    try
-    {
-        const css = await (await fetch(chrome.runtime.getURL('panel.css'))).text();
-        style.textContent = css;
-    }
-    catch (error)
-    {
-        // Without the stylesheet the panel is unstyled but still usable.
-    }
 
     document.documentElement.append(host);
     hide();
