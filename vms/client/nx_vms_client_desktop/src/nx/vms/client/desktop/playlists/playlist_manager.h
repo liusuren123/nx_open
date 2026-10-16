@@ -52,6 +52,12 @@ public:
     Q_INVOKABLE bool renamePlaylist(const QString& id, const QString& name);
 
     /**
+     * Renames the entry at the given row: sets the name it is shown under. An empty name clears it,
+     * so that local media falls back to its file name.
+     */
+    Q_INVOKABLE bool renameEntry(const QString& id, int row, const QString& title);
+
+    /**
      * Adds files and/or folders, expanding folders into the media files they contain (recursively)
      * and filtering out unsupported files.
      */
@@ -105,6 +111,9 @@ public:
 
     /** URL of the entry at the given row; empty when the entry is local media. */
     Q_INVOKABLE QString entryUrl(const QString& playlistId, int row) const;
+
+    /** Name the entry at the given row is shown under; empty if the row is out of range. */
+    Q_INVOKABLE QString entryDisplayName(const QString& playlistId, int row) const;
 
     /**
      * Appends a copy of an entry of one playlist to another. The entry is copied as it is, so a

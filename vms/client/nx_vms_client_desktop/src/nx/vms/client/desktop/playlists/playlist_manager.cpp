@@ -183,6 +183,23 @@ bool PlaylistManager::renamePlaylist(const QString& id, const QString& name)
     return true;
 }
 
+bool PlaylistManager::renameEntry(const QString& id, int row, const QString& title)
+{
+    auto list = playlists();
+    const int index = indexOf(list, fromId(id));
+    if (index < 0)
+        return false;
+
+    auto& entries = list[index].entries;
+    if (row < 0 || row >= entries.size() || entries.at(row).title == title)
+        return false;
+
+    entries[row].title = title;
+    setPlaylists(list);
+    emit playlistChanged(id);
+    return true;
+}
+
 bool PlaylistManager::addPaths(const QString& id, const QStringList& paths)
 {
     QList<PlaylistEntry> entries;
@@ -434,6 +451,14 @@ QString PlaylistManager::entryUrl(const QString& playlistId, int row) const
     const auto entries = playlist(playlistId).entries;
     return row >= 0 && row < static_cast<int>(entries.size())
         ? entries.at(row).url
+        : QString();
+}
+
+QString PlaylistManager::entryDisplayName(const QString& playlistId, int row) const
+{
+    const auto entries = playlist(playlistId).entries;
+    return row >= 0 && row < static_cast<int>(entries.size())
+        ? entries.at(row).displayName()
         : QString();
 }
 

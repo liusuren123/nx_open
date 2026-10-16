@@ -54,6 +54,7 @@ const QStringList& knownActions()
         QStringLiteral("setCurrentPlaylist"),
         QStringLiteral("addFile"),
         QStringLiteral("addStream"),
+        QStringLiteral("renameEntry"),
         QStringLiteral("removeEntry"),
     };
     return actions;
@@ -288,6 +289,30 @@ QJsonObject addStream(PlaylistManager* playlists, const QJsonObject& request)
         {kName, entry.title}};
 }
 
+QJsonObject renameEntry(PlaylistManager* playlists, const QJsonObject& request)
+{
+    const QString id = resolvePlaylistId(playlists, request);
+    if (id.isEmpty())
+        return failure(QStringLiteral("playlistNotFound"));
+
+    const int row = request.value(kRow).toInt(-1);
+    if (row < 0)
+        return failure(QStringLiteral("noRow"));
+
+    // The new name is what the entry is shown under; `title` is accepted as an alias, like in
+    // addStream().
+    QString title = stringValue(request, kName).trimmed();
+    if (title.isEmpty())
+        title = stringValue(request, kTitle).trimmed();
+    if (title.isEmpty())
+        return failure(QStringLiteral("noName"));
+
+    if (!playlists->renameEntry(id, row, title))
+        return failure(QStringLiteral("renameFailed"));
+
+    return {{kOk, true}, {kPlaylist, id}, {kRow, row}, {kName, title}};
+}
+
 QJsonObject removeEntry(PlaylistManager* playlists, const QJsonObject& request)
 {
     const QString id = resolvePlaylistId(playlists, request);
@@ -360,6 +385,8 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists)
         return addFile(playlists, request);
     if (action == QLatin1String("addStream"))
         return addStream(playlists, request);
+    if (action == QLatin1String("renameEntry"))
+        return renameEntry(playlists, request);
     if (action == QLatin1String("removeEntry"))
         return removeEntry(playlists, request);
 

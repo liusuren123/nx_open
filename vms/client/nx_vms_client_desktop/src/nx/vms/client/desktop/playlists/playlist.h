@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <QtCore/QFileInfo>
 #include <QtCore/QList>
 #include <QtCore/QString>
 
@@ -32,11 +33,18 @@ struct PlaylistEntry
     QString username;
     QString password;
 
-    /** Title shown in the playlist; local media is named after its file instead. */
+    /**
+     * Name the entry is shown under. Empty for local media added from a path, which is then named
+     * after its file; set to the URL or the channel name for a stream, and replaced by the user when
+     * an entry is renamed.
+     */
     QString title;
 
     /** Whether the entry is a network stream rather than a local file or folder. */
     bool isStream() const { return !url.isEmpty(); }
+
+    /** Name the entry is shown under: its title when it has one, the file name otherwise. */
+    QString displayName() const { return title.isEmpty() ? QFileInfo(path).fileName() : title; }
 
     bool operator==(const PlaylistEntry& other) const = default;
 };

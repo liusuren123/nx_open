@@ -139,6 +139,50 @@ TEST_F(PlaylistManagerTest, renamePlaylist)
     EXPECT_FALSE(m_manager->renamePlaylist("unknown", "Name"));
 }
 
+TEST_F(PlaylistManagerTest, renameEntry)
+{
+    const QString id = m_manager->createPlaylist();
+    const QString file = createFile("movie.mp4");
+    ASSERT_TRUE(m_manager->addPaths(id, {file}));
+
+    // A local entry is shown under its file name until it is renamed.
+    EXPECT_EQ(m_manager->entryDisplayName(id, 0), "movie.mp4");
+
+    EXPECT_TRUE(m_manager->renameEntry(id, 0, "Holiday"));
+    EXPECT_EQ(m_manager->playlist(id).entries.at(0).displayName(), "Holiday");
+    EXPECT_EQ(m_manager->entryDisplayName(id, 0), "Holiday");
+
+    // Renaming to the same name is a no-op; a bad row or playlist is rejected.
+    EXPECT_FALSE(m_manager->renameEntry(id, 0, "Holiday"));
+    EXPECT_FALSE(m_manager->renameEntry(id, 5, "Name"));
+    EXPECT_FALSE(m_manager->renameEntry("unknown", 0, "Name"));
+}
+
+TEST_F(PlaylistManagerTest, renameEntryWithEmptyNameFallsBackToFileName)
+{
+    const QString id = m_manager->createPlaylist();
+    const QString file = createFile("movie.mp4");
+    ASSERT_TRUE(m_manager->addPaths(id, {file}));
+    ASSERT_TRUE(m_manager->renameEntry(id, 0, "Holiday"));
+
+    EXPECT_TRUE(m_manager->renameEntry(id, 0, QString()));
+    EXPECT_EQ(m_manager->playlist(id).entries.at(0).displayName(), "movie.mp4");
+}
+
+TEST_F(PlaylistManagerTest, renameEntryRenamesAStream)
+{
+    const QString id = m_manager->createPlaylist();
+
+    PlaylistEntry entry;
+    entry.url = "rtsp://example.com/live";
+    entry.title = "rtsp://example.com/live";
+    ASSERT_TRUE(m_manager->addEntries(id, {entry}));
+
+    EXPECT_TRUE(m_manager->renameEntry(id, 0, "Front door"));
+    EXPECT_EQ(m_manager->entryDisplayName(id, 0), "Front door");
+    EXPECT_EQ(m_manager->entryUrl(id, 0), "rtsp://example.com/live");
+}
+
 TEST_F(PlaylistManagerTest, addPathsExpandsFoldersIntoFiles)
 {
     const QString id = m_manager->createPlaylist();

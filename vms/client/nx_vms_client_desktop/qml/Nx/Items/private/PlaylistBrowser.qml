@@ -488,6 +488,20 @@ Item
         entryList.currentIndex = toRow
     }
 
+    function renameEntry(row)
+    {
+        if (row < 0)
+            return
+
+        renameEntryDialog.targetRow = row
+        renameEntryDialog.open()
+    }
+
+    function entryDisplayNameAt(row)
+    {
+        return PlaylistManager.entryDisplayName(PlaylistManager.currentPlaylistId, row)
+    }
+
     function entryPathAt(row)
     {
         return PlaylistManager.entryPath(PlaylistManager.currentPlaylistId, row)
@@ -593,6 +607,13 @@ Item
                 && entryContextMenu.targetRow < entryList.count - 1
             onTriggered: playlistBrowser.moveEntry(entryContextMenu.targetRow,
                 entryContextMenu.targetRow + 1)
+        }
+
+        NxControls.CompactMenuItem
+        {
+            text: qsTr("Rename")
+            enabled: entryContextMenu.targetRow >= 0
+            onTriggered: playlistBrowser.renameEntry(entryContextMenu.targetRow)
         }
 
         NxControls.CompactMenuItem
@@ -817,6 +838,43 @@ Item
         contentItem: TextField
         {
             id: renameField
+            selectByMouse: true
+        }
+    }
+
+    Dialog
+    {
+        id: renameEntryDialog
+
+        /** Row of the entry being renamed. */
+        property int targetRow: -1
+
+        title: qsTr("Rename")
+        modal: true
+        anchors.centerIn: parent
+        width: 320
+        padding: 12
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        onOpened:
+        {
+            renameEntryField.text = playlistBrowser.entryDisplayNameAt(targetRow)
+            renameEntryField.selectAll()
+            renameEntryField.forceActiveFocus()
+        }
+
+        onAccepted:
+        {
+            if (renameEntryField.text.length > 0)
+            {
+                PlaylistManager.renameEntry(PlaylistManager.currentPlaylistId,
+                    targetRow, renameEntryField.text)
+            }
+        }
+
+        contentItem: TextField
+        {
+            id: renameEntryField
             selectByMouse: true
         }
     }

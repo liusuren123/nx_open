@@ -2,23 +2,12 @@
 
 #include "playlist_model.h"
 
-#include <QtCore/QFileInfo>
 #include <QtQml/qqml.h>
 
 #include <nx/vms/client/desktop/application_context.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
 
 namespace nx::vms::client::desktop {
-
-namespace {
-
-/** Name of an entry as it is shown in the playlist: a title for streams, the file name otherwise. */
-QString displayName(const PlaylistEntry& entry)
-{
-    return entry.isStream() ? entry.title : QFileInfo(entry.path).fileName();
-}
-
-} // namespace
 
 PlaylistModel::PlaylistModel(QObject* parent):
     QAbstractListModel(parent)
@@ -87,7 +76,7 @@ void PlaylistModel::rebuildFilteredRows()
     for (int row = 0; row < static_cast<int>(entries.size()); ++row)
     {
         if (m_filter.isEmpty()
-            || displayName(entries.at(row)).contains(m_filter, Qt::CaseInsensitive))
+            || entries.at(row).displayName().contains(m_filter, Qt::CaseInsensitive))
         {
             m_filteredRows.append(row);
         }
@@ -127,7 +116,7 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
     switch (role)
     {
         case FileNameRole:
-            return displayName(entry);
+            return entry.displayName();
 
         case FilePathRole:
             return entry.path;
