@@ -3,6 +3,7 @@
 #include "local_camera_archive_delegate.h"
 
 #include <memory>
+#include <mutex>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
@@ -208,7 +209,10 @@ int LocalCameraArchiveDelegate::interruptCallback(void* opaque)
 
 bool LocalCameraArchiveDelegate::openStream()
 {
-    avdevice_register_all();
+    // Registering the FFmpeg devices is not thread safe, and streams are opened by several playback
+    // threads at once, so it is done once rather than from every one of them.
+    static std::once_flag devicesRegistered;
+    std::call_once(devicesRegistered, [] { avdevice_register_all(); });
 
     if (!d->url.isEmpty())
     {

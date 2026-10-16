@@ -49,6 +49,9 @@ constexpr int kSegmentTimeoutUs = 25'000'000;
 constexpr int kSegmentAttempts = 4;
 constexpr std::chrono::milliseconds kSegmentRetryBaseDelay{400};
 
+/** How long the local server waits for a connection before it looks at the stop flag again. */
+constexpr int kAcceptPollMs = 500;
+
 /**
  * A segment a client is waiting for is fetched as a few ranged requests at once. A single connection
  * is limited per connection by some servers, so this is what makes the wait for the first segment
@@ -342,6 +345,7 @@ struct HlsVodSource::Private
     quint64 remainingBytes = 0;
     bool cacheBudgetKnown = false;
 
+    /** Served by acceptThread, which is the only thread that uses it. */
     std::unique_ptr<QTcpServer> server;
     std::thread acceptThread;
     std::vector<std::thread> workers;
@@ -739,11 +743,19 @@ struct HlsVodSource::Private
         socket->disconnectFromHost();
     }
 
+    /**
+     * Serves the playlist to the demuxer.
+     *
+     * This thread owns the local server: it creates it, uses it and destroys it. A Qt network object
+     * is not thread safe, and closing the server from another thread while this one is blocked in
+     * waitForNewConnection() destroys its socket engine under it, which crashes.
+     */
     void acceptLoop(std::promise<quint16> port)
     {
         server.reset(new QTcpServer());
         if (!server->listen(QHostAddress::LocalHost, 0))
         {
+            server.reset();
             port.set_value(0);
             return;
         }
@@ -751,7 +763,9 @@ struct HlsVodSource::Private
         port.set_value(server->serverPort());
         while (!stop.load())
         {
-            if (!server->waitForNewConnection(500))
+            // A stop request is noticed between the waits, so that the server does not have to be
+            // closed by the thread that requested the stop.
+            if (!server->waitForNewConnection(kAcceptPollMs))
                 continue;
 
             QTcpSocket* socket = server->nextPendingConnection();
@@ -762,6 +776,8 @@ struct HlsVodSource::Private
             socket->close();
             delete socket;
         }
+
+        server.reset();
     }
 
     QByteArray buildLocalPlaylist(quint16 port)
@@ -997,15 +1013,41 @@ std::shared_ptr<HlsVodSource> HlsVodSource::acquire(
         return nullptr;
 
     std::shared_ptr<HlsVodSource> source(created.release());
-    const std::lock_guard<std::mutex> lock(reg.mutex);
 
-    // The sources left behind by the playlists that are no longer used are stopped here, which also
-    // releases their downloads and their local server.
-    while (reg.sources.size() >= kMaxTrackedSources && !reg.order.isEmpty())
-        reg.sources.remove(reg.order.takeFirst());
+    // The sources left behind by the playlists that are no longer used are stopped, which also
+    // releases their downloads and their local server. Only the ones no playback holds any more are
+    // dropped, the oldest first: stopping a source that is still playing would break it.
+    QList<std::shared_ptr<HlsVodSource>> retired;
+    {
+        const std::lock_guard<std::mutex> lock(reg.mutex);
+        for (int i = 0; i < reg.order.size() && reg.sources.size() >= kMaxTrackedSources;)
+        {
+            const QString key = reg.order.at(i);
+            const auto it = reg.sources.find(key);
+            if (it == reg.sources.end())
+            {
+                reg.order.removeAt(i);
+                continue;
+            }
 
-    reg.sources.insert(playlistUrl, source);
-    reg.order.append(playlistUrl);
+            if (it.value().use_count() > 1)
+            {
+                ++i; //< A playback is using it.
+                continue;
+            }
+
+            retired.append(it.value());
+            reg.sources.erase(it);
+            reg.order.removeAt(i);
+        }
+
+        reg.sources.insert(playlistUrl, source);
+        reg.order.append(playlistUrl);
+    }
+
+    // Stopped out here rather than under the registry lock: joining the download and the server
+    // threads takes a moment, and no other playback should be held up by it. (The list is destroyed
+    // when this function returns, which is after the lock has been released.)
     return source;
 }
 
@@ -1080,9 +1122,8 @@ void HlsVodSource::stop()
     d->stop = true;
     d->condition.notify_all();
 
-    if (d->server)
-        d->server->close();
-
+    // The server belongs to the accept thread and is destroyed there, once the thread has noticed the
+    // stop request: closing it from here would pull its socket engine out from under that thread.
     if (d->acceptThread.joinable())
         d->acceptThread.join();
 
