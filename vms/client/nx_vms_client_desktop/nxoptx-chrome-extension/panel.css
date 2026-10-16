@@ -1,0 +1,299 @@
+/* Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/ */
+
+/*
+ * Styles of the media sniffer panel. They live in a shadow root, so nothing here can be changed by
+ * the page and nothing here can change the page.
+ */
+
+:host {
+  all: initial;
+}
+
+.nx-root {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  pointer-events: none;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #e9e9e9;
+  text-align: left;
+  letter-spacing: normal;
+}
+
+.nx-root *,
+.nx-root *::before,
+.nx-root *::after {
+  box-sizing: border-box;
+}
+
+.nx-pill,
+.nx-card {
+  pointer-events: auto;
+}
+
+/* ------------------------------------------------------------------ pill */
+
+.nx-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid #3d3d3d;
+  border-radius: 999px;
+  background: #232323;
+  color: #e9e9e9;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  animation: nx-in 0.18s ease-out;
+}
+
+.nx-pill:hover {
+  background: #2c2c2c;
+  border-color: #4d4d4d;
+}
+
+.nx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a911e;
+  box-shadow: 0 0 0 0 rgba(58, 145, 30, 0.75);
+  animation: nx-pulse 1.8s infinite;
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------------ card */
+
+.nx-card {
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  border: 1px solid #3d3d3d;
+  border-radius: 10px;
+  background: #1f1f1f;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  animation: nx-in 0.18s ease-out;
+}
+
+.nx-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nx-logo {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(140deg, #4cbf27, #2c7016);
+  flex: 0 0 auto;
+}
+
+.nx-title {
+  flex: 1;
+  font-weight: 600;
+  color: #f2f2f2;
+}
+
+.nx-title b {
+  color: #6ecb45;
+}
+
+.nx-playlist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #a8a8a8;
+}
+
+.nx-playlist-row > span {
+  flex: 0 0 auto;
+}
+
+.nx-playlist {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ list */
+
+.nx-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.nx-item {
+  padding: 8px 0;
+  border-top: 1px solid #303030;
+}
+
+.nx-item:first-child {
+  border-top: 0;
+}
+
+.nx-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-kind {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.nx-name {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid #3d3d3d;
+  border-radius: 5px;
+  background: #151515;
+  color: #e9e9e9;
+  font: inherit;
+}
+
+.nx-url {
+  margin: 4px 0 6px;
+  overflow: hidden;
+  color: #9a9a9a;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nx-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx-status {
+  overflow: hidden;
+  color: #6ecb45;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nx-status.nx-error {
+  color: #e2685f;
+}
+
+/* ------------------------------------------------------------------ bits */
+
+.nx-primary,
+.nx-ghost,
+.nx-icon {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.nx-primary {
+  border: 1px solid #3a911e;
+  background: #3a911e;
+  color: #ffffff;
+}
+
+.nx-primary:hover {
+  background: #46ab26;
+}
+
+.nx-ghost {
+  border: 1px solid #454545;
+  background: transparent;
+  color: #cfcfcf;
+}
+
+.nx-ghost:hover {
+  border-color: #5a5a5a;
+  background: #2a2a2a;
+}
+
+.nx-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8f8f8f;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.nx-icon:hover {
+  color: #ffffff;
+  background: #333333;
+}
+
+.nx-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #303030;
+}
+
+.nx-hint {
+  margin-left: auto;
+  color: #8a8a8a;
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ input reset */
+
+.nx-root input {
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.nx-root input:focus {
+  outline: 1px solid #3a911e;
+  outline-offset: 0;
+}
+
+/* ------------------------------------------------------------------ animation */
+
+@keyframes nx-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes nx-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(58, 145, 30, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(58, 145, 30, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(58, 145, 30, 0);
+  }
+}

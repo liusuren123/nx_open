@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Nx Optx 媒体嗅探器",
+  "version": "1.0.0",
+  "description": "嗅探当前页面上的媒体流，并在页面右下角提示，可一键添加到正在运行的 Nx Optx 播放器。",
+  "minimum_chrome_version": "102",
+
+  "permissions": [
+    "webRequest",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_title": "Nx Optx 媒体嗅探器",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.css"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!-- Copyright 2018-present Network Optix, Inc. Licensed under MPL 2.0: www.mozilla.org/MPL/2.0/ -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>Nx Optx 媒体嗅探器</title>
+</head>
+<body>
+  <header class="head">
+    <span class="logo"></span>
+    <div class="head-text">
+      <div class="title">Nx Optx 媒体嗅探器</div>
+      <div class="subtitle" id="subtitle">正在检查当前页面…</div>
+    </div>
+    <button type="button" class="icon" id="clear" title="清空当前页面的结果">×</button>
+  </header>
+
+  <section class="settings">
+    <label class="row">
+      <input type="checkbox" id="showPanel">
+      <span>在页面右下角显示提示面板</span>
+    </label>
+    <label class="row">
+      <input type="checkbox" id="autoExpand">
+      <span>面板默认展开</span>
+    </label>
+    <label class="row">
+      <span class="label">目标播放列表</span>
+      <input type="text" id="playlist" placeholder="（当前播放列表）">
+    </label>
+  </section>
+
+  <ul class="list" id="list"></ul>
+  <p class="empty" id="empty">还没有发现媒体资源。播放页面上的视频或音频，它们会出现在这里。</p>
+
+  <footer class="foot">
+    <button type="button" class="primary" id="addAll">全部添加</button>
+    <span class="hint">需要播放器正在运行并已注册 nxoptx:// 协议</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
