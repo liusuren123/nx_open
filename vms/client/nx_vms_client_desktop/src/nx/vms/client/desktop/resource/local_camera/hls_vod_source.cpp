@@ -54,6 +54,19 @@ constexpr std::chrono::milliseconds kSegmentRetryBaseDelay{400};
 constexpr int kAcceptPollMs = 500;
 
 /**
+ * How far ahead of the last segment a client asked for the segments are prefetched, and how many are
+ * prefetched before a client has asked for any.
+ *
+ * A playlist is prepared - and its source created - for every item of a playlist the interface shows,
+ * long before any of them is played. Downloading a whole VOD (minutes of video, hundreds of megabytes)
+ * for each of them would leave nothing of the connection for the one being played, and a server that
+ * limits every connection on its own cannot give it back: only what is being played, and a little of
+ * what comes next, is worth fetching ahead. What is missing is fetched when it is asked for.
+ */
+constexpr int kPrefetchAhead = 15;
+constexpr int kPrefetchInitial = 4;
+
+/**
  * A segment a client is waiting for is fetched as a few ranged requests at once. A single connection
  * is limited per connection by some servers, so this is what makes the wait for the first segment
  * (and for the one a seek lands on) short.
@@ -360,6 +373,14 @@ struct HlsVodSource::Private
      */
     std::atomic<bool> rangesUsable{true};
 
+    /**
+     * Last segment a client asked for, -1 before the first one. Guarded by mutex.
+     *
+     * Playback is what tells where the media is being read, and the prefetch follows it: the workers
+     * do not go past it by more than kPrefetchAhead segments.
+     */
+    int requested = -1;
+
     quint64 remainingBytes = 0;
     bool cacheBudgetKnown = false;
 
@@ -371,6 +392,16 @@ struct HlsVodSource::Private
     QString segmentPath(int index) const
     {
         return QDir(folder).absoluteFilePath(QString::number(index) + ".ts");
+    }
+
+    /** Last segment the prefetch workers are allowed to reach, for the moment. */
+    int prefetchLimit() const
+    {
+        const int limit = requested < 0
+            ? kPrefetchInitial - 1
+            : qMin(requested + kPrefetchAhead, static_cast<int>(states.size()) - 1);
+
+        return qBound(0, limit, static_cast<int>(states.size()) - 1);
     }
 
     /** Next segment to download, honoring the ones a client is waiting for. */
@@ -394,7 +425,7 @@ struct HlsVodSource::Private
                 continue;
             }
 
-            if (nextIndex >= static_cast<int>(states.size()))
+            if (nextIndex > prefetchLimit())
                 return -1;
 
             const int index = nextIndex++;
@@ -787,6 +818,16 @@ struct HlsVodSource::Private
                 sendResponse(socket, 404, "Not Found", "text/plain", "no such segment");
                 return;
             }
+
+            // The segments are read in playback order, so the one asked for is where the media is: the
+            // prefetch follows it rather than downloading the whole playlist in advance. A seek leaves a
+            // hole behind it, and the media that follows does not need it, so it is not filled either.
+            {
+                const std::lock_guard<std::mutex> lock(mutex);
+                requested = index;
+                nextIndex = qMax(nextIndex, index);
+            }
+            condition.notify_all();
 
             if (!ensureSegment(index))
             {

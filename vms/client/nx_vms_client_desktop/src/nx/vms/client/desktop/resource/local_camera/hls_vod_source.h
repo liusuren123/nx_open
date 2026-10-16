@@ -18,10 +18,10 @@ namespace nx::vms::client::desktop {
  * how fast the network as a whole is. Downloading several segments concurrently works around that:
  * the aggregate rate is what matters, and it is typically several times the single-connection one.
  *
- * The segments are downloaded into the stream cache folder, so a replay and a seek need no network,
- * and the local server below hands them to FFmpeg as if they were being streamed: the demuxer still
- * fetches the media itself, but it now talks to the local server, which serves the already downloaded
- * segments and waits for the ones still on their way.
+ * The segments are downloaded into the stream cache folder, ahead of the position being played and
+ * not much further: the local server below hands them to FFmpeg as if they were being streamed, and
+ * the demuxer still fetches the media itself, but it now talks to the local server, which serves the
+ * already downloaded segments, fetches the ones on their way and is asked for the rest.
  *
  * Live playlists and anything that is not HLS are not handled: they are read directly, as before.
  */
