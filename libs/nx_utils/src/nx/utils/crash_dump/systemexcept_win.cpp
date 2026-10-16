@@ -28,6 +28,7 @@ class GlobalCrashDumpSettings
 {
 public:
     bool dumpFullMemory;
+    std::string dumpDirectory;
 
     GlobalCrashDumpSettings()
     :
@@ -48,6 +49,28 @@ typedef BOOL (WINAPI *pfMiniDumpWriteDump) (
     PMINIDUMP_CALLBACK_INFORMATION );
 
 static void LegacyDump( HANDLE );
+
+/**
+ * Folder the dumps are written into, or nullptr when it cannot be determined.
+ *
+ * The configured folder wins; otherwise the local app data folder is written into @p defaultBuffer,
+ * which is what the returned pointer then refers to, so the buffer has to outlive the call.
+ */
+static const char* dumpDirectory( char ( &defaultBuffer )[MAX_PATH] )
+{
+    if( !globalCrashDumpSettingsInstance.dumpDirectory.empty() )
+        return globalCrashDumpSettingsInstance.dumpDirectory.c_str();
+
+    if( FAILED(SHGetFolderPathA(
+            NULL,
+            CSIDL_LOCAL_APPDATA,
+            NULL,
+            0,
+            defaultBuffer)))
+        return NULL;
+
+    return defaultBuffer;
+}
 
 static int GetBaseName(const char* name, DWORD len)
 {
@@ -107,13 +130,9 @@ void WriteDump( HANDLE hThread , PEXCEPTION_POINTERS ex ) {
         return;
     }
 
-    char sAppData[MAX_PATH];
-    if( FAILED(SHGetFolderPathA(
-            NULL,
-            CSIDL_LOCAL_APPDATA,
-            NULL,
-            0,
-            sAppData)))
+    char sDefaultAppData[MAX_PATH];
+    const char* sAppData = dumpDirectory( sDefaultAppData );
+    if( !sAppData )
         return;
 
     char sCrashPrefix[MAX_PATH];
@@ -266,7 +285,12 @@ void win32_exception::setCreateFullCrashDump( bool isFull )
     globalCrashDumpSettingsInstance.dumpFullMemory = isFull;
 }
 
-std::string win32_exception::getCrashDirectory()
+void win32_exception::setCrashDumpDirectory( const std::string& directory )
+{
+    globalCrashDumpSettingsInstance.dumpDirectory = directory;
+}
+
+std::string win32_exception::defaultCrashDirectory()
 {
     char sAppData[MAX_PATH];
     if( FAILED(SHGetFolderPathA(
@@ -278,6 +302,14 @@ std::string win32_exception::getCrashDirectory()
         return std::string( "." );
 
     return std::string( sAppData );
+}
+
+std::string win32_exception::getCrashDirectory()
+{
+    if( !globalCrashDumpSettingsInstance.dumpDirectory.empty() )
+        return globalCrashDumpSettingsInstance.dumpDirectory;
+
+    return defaultCrashDirectory();
 }
 
 std::string win32_exception::getCrashPattern()
@@ -294,13 +326,9 @@ std::string win32_exception::getCrashPattern()
 static
 HANDLE
 CreateLegacyDumpFile() {
-    char sAppData[MAX_PATH];
-    if( FAILED(SHGetFolderPathA(
-            NULL,
-            CSIDL_LOCAL_APPDATA,
-            NULL,
-            0,
-            sAppData)))
+    char sDefaultAppData[MAX_PATH];
+    const char* sAppData = dumpDirectory( sDefaultAppData );
+    if( !sAppData )
         return INVALID_HANDLE_VALUE;
 
     char sCrashPrefix[MAX_PATH];

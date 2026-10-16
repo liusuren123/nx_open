@@ -405,6 +405,12 @@ struct ApplicationContext::Private
         #if defined(Q_OS_WIN)
             if (localSettings->createFullCrashDump())
                 win32_exception::setCreateFullCrashDump(true);
+
+            // A full dump is several gigabytes, so where it goes matters. The setting is empty by
+            // default, which keeps the dumps next to the other local application data.
+            const QString crashDumpFolder = localSettings->crashDumpFolder();
+            if (!crashDumpFolder.isEmpty())
+                win32_exception::setCrashDumpDirectory(crashDumpFolder.toLocal8Bit().toStdString());
         #endif
 
         // Runtime settings are standalone, but some values are initialized from the persistent

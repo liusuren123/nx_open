@@ -168,6 +168,9 @@ public:
     Property<qint64> streamCacheLimitBytes{this, "streamCacheLimitBytes", 0,
         "Upper bound of the stream cache, in bytes. Zero selects the default one."};
 
+    Property<QString> crashDumpFolder{this, "crashDumpFolder", {},
+        "Folder the crash dumps are written to. Empty selects the default one."};
+
     Property<bool> allowMtDecoding{this, "allowMtDecoding", true,
         "Disable MT decoding if false, enable auto selection if true."};
     Property<bool> forceMtDecoding{this, "forceMtDecoding", false,

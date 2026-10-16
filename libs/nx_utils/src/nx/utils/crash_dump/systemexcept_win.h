@@ -25,7 +25,12 @@ public:
     */
     static void setCreateFullCrashDump( bool isFull );
 
+    //!Folder the crash dumps are written to. Empty (the default) selects the local app data folder.
+    static void setCrashDumpDirectory( const std::string& directory );
+
     //!How to find created dumps
     static std::string getCrashDirectory();
+    //!The folder used when no directory is set.
+    static std::string defaultCrashDirectory();
     static std::string getCrashPattern();
 };

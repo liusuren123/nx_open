@@ -25,6 +25,10 @@
 #include <ui/dialogs/common/message_box.h>
 #include <ui/workaround/widgets_signals_workaround.h>
 
+#if defined(Q_OS_WIN)
+#include <nx/utils/crash_dump/systemexcept.h>
+#endif
+
 using namespace nx::vms::client;
 using namespace nx::vms::client::desktop;
 
@@ -82,6 +86,11 @@ QnGeneralPreferencesWidget::QnGeneralPreferencesWidget(QWidget* parent):
     connect(ui->streamCacheFolderEdit, &QLineEdit::textChanged, this,
         &QnAbstractPreferencesWidget::hasChangesChanged);
     connect(ui->streamCacheLimitSpinBox, QnSpinboxIntValueChanged, this,
+        &QnAbstractPreferencesWidget::hasChangesChanged);
+
+    connect(ui->browseCrashDumpFolderButton, &QPushButton::clicked, this,
+        &QnGeneralPreferencesWidget::at_browseCrashDumpFolderButton_clicked);
+    connect(ui->crashDumpFolderEdit, &QLineEdit::textChanged, this,
         &QnAbstractPreferencesWidget::hasChangesChanged);
 
     // The cached data is only removed when the user asks for it, so the size is reported here.
@@ -169,6 +178,24 @@ void QnGeneralPreferencesWidget::applyChanges()
         updateStreamCacheUsage();
     }
 
+    // The crash dump folder is applied right away, so a crash that follows already uses it.
+#if defined(Q_OS_WIN)
+    {
+        const QString defaultFolder =
+            QString::fromLocal8Bit(win32_exception::defaultCrashDirectory().c_str());
+        const QString folder = crashDumpFolder();
+
+        // The default is not written down, so the setting keeps following it if it ever changes.
+        appContext()->localSettings()->crashDumpFolder =
+            (folder == defaultFolder) ? QString() : folder;
+
+        win32_exception::setCrashDumpDirectory(
+            (folder.isEmpty() || folder == defaultFolder)
+                ? std::string()
+                : folder.toLocal8Bit().toStdString());
+    }
+#endif
+
     if (recordingSettingsChanged)
         emit this->recordingSettingsChanged();
 }
@@ -183,6 +210,10 @@ void QnGeneralPreferencesWidget::loadDataToUi()
         setStreamCacheLimitBytes(cache->limitBytes());
         updateStreamCacheUsage();
     }
+
+#if defined(Q_OS_WIN)
+    setCrashDumpFolder(QString::fromLocal8Bit(win32_exception::getCrashDirectory().c_str()));
+#endif
     setUserIdleTimeoutMs(appContext()->localSettings()->userIdleTimeoutMs());
     setPrimaryAudioDeviceName(screenRecordingSettings()->primaryAudioDeviceName());
     setSecondaryAudioDeviceName(screenRecordingSettings()->secondaryAudioDeviceName());
@@ -215,6 +246,11 @@ bool QnGeneralPreferencesWidget::hasChanges() const
         if (cache->limitBytes() != streamCacheLimitBytes())
             return true;
     }
+
+#if defined(Q_OS_WIN)
+    if (QString::fromLocal8Bit(win32_exception::getCrashDirectory().c_str()) != crashDumpFolder())
+        return true;
+#endif
 
     bool oldPauseOnInactivity = (appContext()->localSettings()->userIdleTimeoutMs() > 0);
     bool newPauseOnInactivity = userIdleTimeoutMs() > 0;
@@ -313,6 +349,18 @@ void QnGeneralPreferencesWidget::at_browseStreamCacheFolderButton_clicked()
     ui->streamCacheFolderEdit->setText(QDir::toNativeSeparators(folder));
 }
 
+void QnGeneralPreferencesWidget::at_browseCrashDumpFolderButton_clicked()
+{
+    const QString folder = QFileDialog::getExistingDirectory(this,
+        tr("Select Folder..."),
+        ui->crashDumpFolderEdit->text(),
+        QnCustomFileDialog::directoryDialogOptions());
+    if (folder.isEmpty())
+        return;
+
+    ui->crashDumpFolderEdit->setText(QDir::toNativeSeparators(folder));
+}
+
 void QnGeneralPreferencesWidget::at_clearStreamCacheButton_clicked()
 {
     StreamCache* const cache = appContext()->streamCache();
@@ -360,6 +408,16 @@ QString QnGeneralPreferencesWidget::streamCacheFolder() const
 void QnGeneralPreferencesWidget::setStreamCacheFolder(const QString& value)
 {
     ui->streamCacheFolderEdit->setText(value);
+}
+
+QString QnGeneralPreferencesWidget::crashDumpFolder() const
+{
+    return ui->crashDumpFolderEdit->text().trimmed();
+}
+
+void QnGeneralPreferencesWidget::setCrashDumpFolder(const QString& value)
+{
+    ui->crashDumpFolderEdit->setText(value);
 }
 
 qint64 QnGeneralPreferencesWidget::streamCacheLimitBytes() const

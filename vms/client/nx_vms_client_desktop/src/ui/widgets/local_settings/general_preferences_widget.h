@@ -33,6 +33,7 @@ private:
     void at_mediaFoldersList_selectionChanged();
     void at_browseStreamCacheFolderButton_clicked();
     void at_clearStreamCacheButton_clicked();
+    void at_browseCrashDumpFolderButton_clicked();
 
 private:
     QStringList mediaFolders() const;
@@ -44,6 +45,10 @@ private:
 
     qint64 streamCacheLimitBytes() const;
     void setStreamCacheLimitBytes(qint64 value);
+
+    /** Crash dump folder shown in the UI; empty means the default one is used. */
+    QString crashDumpFolder() const;
+    void setCrashDumpFolder(const QString& value);
 
     /** Shows how much of the cache limit is used up. */
     void updateStreamCacheUsage();
