@@ -930,6 +930,9 @@ QnAbstractMediaDataPtr LocalCameraArchiveDelegate::makeAudioPacket()
 
     QnWritableCompressedAudioDataPtr audio(
         new QnWritableCompressedAudioData(d->packet->size, d->audioCodecParameters));
+    // The decoder is chosen by the packet's codec id, exactly as for video: without it the packet
+    // would carry AV_CODEC_ID_NONE and no audio decoder could ever be created for it.
+    audio->compressionType = d->audioCodecParameters->getAvCodecParameters()->codec_id;
     audio->channelNumber = 0;
     audio->timestamp = packetTimestampUs();
     if (d->packet->duration > 0)
