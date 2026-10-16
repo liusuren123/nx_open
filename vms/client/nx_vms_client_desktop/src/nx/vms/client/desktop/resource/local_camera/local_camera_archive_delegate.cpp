@@ -260,6 +260,9 @@ bool LocalCameraArchiveDelegate::openStream()
             // a server that limits every connection on its own would otherwise keep the playlist below
             // real time, however fast the network is. A plain file is re-read through the disk cache
             // instead.
+            //
+            // A replacement that fails keeps the input it was opened with, so a failed attempt simply
+            // leaves the source being read directly and the chain may safely try the next one.
             if (!d->hlsSource && switchToPrefetchedPlaylist())
             {
                 if (!readStreamInfo())
@@ -341,6 +344,12 @@ bool LocalCameraArchiveDelegate::openStream()
 
 bool LocalCameraArchiveDelegate::readStreamInfo()
 {
+    if (!d->formatContext)
+    {
+        d->lastError = tr("Source '%1' is not open.").arg(sourceDescription());
+        return false;
+    }
+
     // Let av_read_frame() bail out once playback is stopped.
     d->formatContext->interrupt_callback.callback =
         &LocalCameraArchiveDelegate::interruptCallback;
@@ -626,35 +635,38 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
 
     const qint64 acquireMs = timer.restart();
 
-    // Read the media from the local server instead of the original playlist.
-    closeStream();
-    d->hlsSource = source;
-
-    d->formatContext = avformat_alloc_context();
-    if (!d->formatContext)
+    // The replacement is built before the input in use is touched: should the local playlist fail to
+    // open, the source keeps being read through the input it was opened with instead of being left
+    // with none. On failure avformat_open_input() releases the context itself, so nothing is left to
+    // free here.
+    AVFormatContext* formatContext = avformat_alloc_context();
+    if (!formatContext)
     {
         d->lastError = tr("Failed to allocate an FFmpeg context.");
-        closeStream();
         return false;
     }
 
-    d->formatContext->interrupt_callback.callback =
+    formatContext->interrupt_callback.callback =
         &LocalCameraArchiveDelegate::interruptCallback;
-    d->formatContext->interrupt_callback.opaque = this;
+    formatContext->interrupt_callback.opaque = this;
 
     // No read timeout here: a segment may still be downloading when the demuxer asks for it.
     AVDictionary* options = nullptr;
     av_dict_set(&options, "user_agent", "NxMetaClient", 0);
-    const int result = avformat_open_input(&d->formatContext,
-        d->hlsSource->url().toUtf8().constData(), /*inputFormat*/ nullptr, &options);
+    const int result = avformat_open_input(&formatContext,
+        source->url().toUtf8().constData(), /*inputFormat*/ nullptr, &options);
     av_dict_free(&options);
 
     if (result < 0)
     {
         d->lastError = tr("Failed to open the prefetched stream '%1'.").arg(sourceDescription());
-        closeStream();
         return false;
     }
+
+    // Read the media from the local server instead of the original playlist.
+    closeStream();
+    d->hlsSource = source;
+    d->formatContext = formatContext;
 
     NX_INFO(typeid(LocalCameraArchiveDelegate),
         "Prefetched '%1' in %2 ms (source %3 ms, open %4 ms); gui thread: %5.",
@@ -666,9 +678,9 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
 
 bool LocalCameraArchiveDelegate::switchToCachedInput()
 {
-    // Only a source the user expects to be a finite file, served over plain HTTP, is worth caching.
-    // Anything else is read directly, as it was before the cache existed.
-    if (!d->filePlaybackExpected || schemeOf(d->url) != StreamScheme::http)
+    // Only a source the user expects to be a finite file, served over plain HTTP and already opened,
+    // is worth caching. Anything else is read directly, as it was before the cache existed.
+    if (!d->formatContext || !d->filePlaybackExpected || schemeOf(d->url) != StreamScheme::http)
         return false;
 
     const qint64 duration = d->formatContext->duration; //< In AV_TIME_BASE units (microseconds).
@@ -696,34 +708,36 @@ bool LocalCameraArchiveDelegate::switchToCachedInput()
     if (!reader)
         return false;
 
-    // Read the resource through the cache instead of the connection just used to probe it. The cache
-    // owns its input, so the format context must be told not to close it; the cache is also what
-    // keeps the file seekable no matter how the connection behaves.
-    closeStream();
-    d->cacheReader = reader;
-
-    AVFormatContext* const formatContext = avformat_alloc_context();
+    // The replacement is built before the input in use is touched: should the cached copy fail to
+    // open, the source keeps being read through the input it was opened with instead of being left
+    // with none. The cache owns its input, so the format context must be told not to close it; the
+    // cache is also what keeps the file seekable no matter how the connection behaves.
+    AVFormatContext* formatContext = avformat_alloc_context();
     if (!formatContext)
     {
         d->lastError = tr("Failed to allocate an FFmpeg context.");
-        closeStream();
+        reader->requestStop();
         return false;
     }
 
     formatContext->flags |= AVFMT_FLAG_CUSTOM_IO;
-    formatContext->pb = d->cacheReader->avioContext();
+    formatContext->pb = reader->avioContext();
     formatContext->interrupt_callback.callback = &LocalCameraArchiveDelegate::interruptCallback;
     formatContext->interrupt_callback.opaque = this;
-    d->formatContext = formatContext;
 
     // The URL is only a hint for the format probing here: the data itself comes from the cache.
-    if (avformat_open_input(&d->formatContext, d->url.toUtf8().constData(),
+    if (avformat_open_input(&formatContext, d->url.toUtf8().constData(),
             /*inputFormat*/ nullptr, /*options*/ nullptr) < 0)
     {
         d->lastError = tr("Failed to open the cached stream '%1'.").arg(sourceDescription());
-        closeStream();
+        reader->requestStop();
         return false;
     }
+
+    // Read the resource through the cache instead of the connection just used to probe it.
+    closeStream();
+    d->cacheReader = reader;
+    d->formatContext = formatContext;
 
     return true;
 }

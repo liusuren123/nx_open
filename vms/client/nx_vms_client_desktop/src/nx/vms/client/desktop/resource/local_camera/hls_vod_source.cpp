@@ -1140,38 +1140,53 @@ std::shared_ptr<HlsVodSource> HlsVodSource::acquire(
     // The sources left behind by the playlists that are no longer used are stopped, which also
     // releases their downloads and their local server. Only the ones no playback holds any more are
     // dropped, the oldest first: stopping a source that is still playing would break it.
+    std::shared_ptr<HlsVodSource> result = source;
     QList<std::shared_ptr<HlsVodSource>> retired;
     {
         const std::lock_guard<std::mutex> lock(reg.mutex);
-        for (int i = 0; i < reg.order.size() && reg.sources.size() >= kMaxTrackedSources;)
+
+        // Another playback may have created the same playlist while this one was being built: the one
+        // registered first keeps serving it, and the copy built here is dropped. Registering both
+        // would leave the loser untracked, running a second local server that writes the same cached
+        // files as the one the registry knows about.
+        const auto existing = reg.sources.find(playlistUrl);
+        if (existing != reg.sources.end())
         {
-            const QString key = reg.order.at(i);
-            const auto it = reg.sources.find(key);
-            if (it == reg.sources.end())
-            {
-                reg.order.removeAt(i);
-                continue;
-            }
-
-            if (it.value().use_count() > 1)
-            {
-                ++i; //< A playback is using it.
-                continue;
-            }
-
-            retired.append(it.value());
-            reg.sources.erase(it);
-            reg.order.removeAt(i);
+            result = existing.value();
         }
+        else
+        {
+            for (int i = 0; i < reg.order.size() && reg.sources.size() >= kMaxTrackedSources;)
+            {
+                const QString key = reg.order.at(i);
+                const auto it = reg.sources.find(key);
+                if (it == reg.sources.end())
+                {
+                    reg.order.removeAt(i);
+                    continue;
+                }
 
-        reg.sources.insert(playlistUrl, source);
-        reg.order.append(playlistUrl);
+                if (it.value().use_count() > 1)
+                {
+                    ++i; //< A playback is using it.
+                    continue;
+                }
+
+                retired.append(it.value());
+                reg.sources.erase(it);
+                reg.order.removeAt(i);
+            }
+
+            reg.sources.insert(playlistUrl, source);
+            reg.order.append(playlistUrl);
+        }
     }
 
     // Stopped out here rather than under the registry lock: joining the download and the server
-    // threads takes a moment, and no other playback should be held up by it. (The list is destroyed
-    // when this function returns, which is after the lock has been released.)
-    return source;
+    // threads takes a moment, and no other playback should be held up by it. The copies that lost the
+    // race and the sources evicted above are destroyed here, once the lock has been released, and that
+    // is what stops them. `result` is a separate handle, so it outlives them.
+    return result;
 }
 
 bool HlsVodSource::isServing(const QString& playlistUrl)
