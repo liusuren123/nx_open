@@ -495,7 +495,11 @@ bool StreamCacheReader::Private::openSource()
     av_dict_set(&options, "reconnect", "1", 0);
     av_dict_set(&options, "reconnect_streamed", "1", 0);
     av_dict_set(&options, "reconnect_delay_max", "4", 0);
-    av_dict_set(&options, "user_agent", "NxMetaClient", 0);
+
+    const HttpSourceHeaders headers = httpSourceHeaders(url);
+    av_dict_set(&options, "user_agent", headers.userAgent.toUtf8().constData(), 0);
+    if (!headers.referer.isEmpty())
+        av_dict_set(&options, "referer", headers.referer.toUtf8().constData(), 0);
 
     const int result = avio_open2(
         &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);

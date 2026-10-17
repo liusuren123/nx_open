@@ -38,11 +38,11 @@ extern "C" {
 
 #include <nx/utils/log/log.h>
 
+#include "local_camera_source.h"
+
 namespace nx::vms::client::desktop {
 
 namespace {
-
-constexpr char kUserAgent[] = "NxMetaClient";
 
 /** A playlist is a small text file; a segment may take minutes on a slow server. */
 constexpr int kPlaylistTimeoutUs = 6'000'000;
@@ -273,7 +273,10 @@ bool httpGet(const QString& url, std::atomic<bool>* stop, int timeoutUs, QByteAr
     QString* errorOut = nullptr, qint64 rangeStart = -1, qint64 rangeEnd = -1)
 {
     AVDictionary* options = nullptr;
-    av_dict_set(&options, "user_agent", kUserAgent, 0);
+    const HttpSourceHeaders headers = httpSourceHeaders(url);
+    av_dict_set(&options, "user_agent", headers.userAgent.toUtf8().constData(), 0);
+    if (!headers.referer.isEmpty())
+        av_dict_set(&options, "referer", headers.referer.toUtf8().constData(), 0);
     // A reset connection is retried by FFmpeg itself before it gives the request up.
     av_dict_set(&options, "reconnect", "1", 0);
     av_dict_set(&options, "reconnect_streamed", "1", 0);

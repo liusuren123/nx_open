@@ -82,14 +82,21 @@ bool isMulticastAddress(const QString& host)
  * Options a progressive HTTP source is opened with. The same ones are used to probe whether the
  * source is a file, so a live stream keeps the connection opened for the probe.
  */
-QList<QPair<QString, QString>> httpOptions()
+QList<QPair<QString, QString>> httpOptions(const QString& url)
 {
-    return {
+    const HttpSourceHeaders headers = httpSourceHeaders(url);
+
+    QList<QPair<QString, QString>> options{
         {"rw_timeout", "8000000"},
         {"reconnect", "1"},
         {"reconnect_streamed", "1"},
         {"reconnect_delay_max", "4"},
-        {"user_agent", "NxMetaClient"}};
+        {"user_agent", headers.userAgent}};
+
+    if (!headers.referer.isEmpty())
+        options.append({"referer", headers.referer});
+
+    return options;
 }
 
 /**
@@ -531,7 +538,7 @@ bool LocalCameraArchiveDelegate::openUrl()
         {
             case StreamScheme::http:
                 // Progressive HTTP, HLS (m3u8) and DASH are all auto-detected by FFmpeg.
-                options = httpOptions();
+                options = httpOptions(effectiveUrl());
                 break;
 
             case StreamScheme::rtmp:

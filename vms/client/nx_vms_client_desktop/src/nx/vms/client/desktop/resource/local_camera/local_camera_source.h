@@ -17,6 +17,24 @@ namespace nx::vms::client::desktop {
 QString localCameraSourceUrlForDisplay(const QString& url);
 
 /**
+ * User agent and referer an HTTP(S) source is opened with.
+ *
+ * Most sources are served to any client, but some services sign a media address together with the
+ * client that asked for it and also check the referer (Bilibili does both for `platform=pc`
+ * addresses). Such a source answers 403 Forbidden to anything that does not look like its own web
+ * player, even though the address itself is still within its validity period.
+ */
+struct HttpSourceHeaders
+{
+    QString userAgent;
+
+    /** Empty when the source does not need a referer. */
+    QString referer;
+};
+
+HttpSourceHeaders httpSourceHeaders(const QString& url);
+
+/**
  * A client-side video source configured by the user, e.g. an RTSP camera. Such sources are opened
  * directly by the client through FFmpeg, without a media server, and are persisted in the local
  * settings.

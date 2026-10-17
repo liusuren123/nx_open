@@ -75,6 +75,26 @@ QString LocalCameraSource::displayName() const
     return name.isEmpty() ? localCameraSourceUrlForDisplay(url) : name;
 }
 
+HttpSourceHeaders httpSourceHeaders(const QString& url)
+{
+    HttpSourceHeaders headers{QStringLiteral("NxMetaClient"), {}};
+
+    const QString host = QUrl(url).host().toLower();
+    const bool isBilibili = host == QLatin1String("bilivideo.com")
+        || host.endsWith(QLatin1String(".bilivideo.com"))
+        || host == QLatin1String("bilibili.com")
+        || host.endsWith(QLatin1String(".bilibili.com"));
+    if (!isBilibili)
+        return headers;
+
+    // A `platform=pc` address was signed for a browser, and the CDN checks the referer as well.
+    headers.userAgent = QStringLiteral(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Safari/537.36");
+    headers.referer = QStringLiteral("https://www.bilibili.com/");
+    return headers;
+}
+
 void classifyLocalCameraSource(LocalCameraSource& source)
 {
     source.seekableFile = false;
