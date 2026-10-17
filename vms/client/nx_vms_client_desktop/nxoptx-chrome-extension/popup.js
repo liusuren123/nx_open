@@ -73,9 +73,29 @@ function buildUri(item, name)
         + (playlist ? `&playlist=${encode(playlist)}` : '');
 }
 
-/** The browser hands the command to the player through the registered nxoptx:// handler. */
-function openUri(uri)
+/**
+ * Hands the command to the browser, which passes it to the player through the registered
+ * nxoptx:// handler.
+ *
+ * The navigation is started on the page's tab rather than in this popup. Chrome attaches its
+ * "open this app?" prompt to the document that starts the navigation, and inside the small
+ * popup the prompt is clipped.
+ */
+async function openUri(uri)
 {
+    if (tabId >= 0)
+    {
+        try
+        {
+            await chrome.tabs.update(tabId, {url: uri});
+            return;
+        }
+        catch (error)
+        {
+            // The tab is gone; fall through to a link from this document.
+        }
+    }
+
     const anchor = document.createElement('a');
     anchor.href = uri;
     anchor.style.display = 'none';
