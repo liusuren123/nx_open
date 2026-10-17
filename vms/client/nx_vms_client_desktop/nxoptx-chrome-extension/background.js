@@ -268,8 +268,9 @@ chrome.webRequest.onBeforeRequest.addListener(
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) =>
 {
-    // A new document starts a new list: a stream of the previous page is not this page's.
-    if (changeInfo.status === 'loading')
+    // Only a navigation of the tab itself starts a new list. A subframe that finishes loading
+    // (an ad, a player's helper page) must not drop what the page has already found.
+    if (changeInfo.url)
         clearTab(tabId);
 });
 

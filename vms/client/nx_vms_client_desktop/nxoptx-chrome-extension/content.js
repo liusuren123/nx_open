@@ -12,7 +12,7 @@
     window.__nxoptxInstalled = true;
 
     const SCHEME = 'nxoptx';
-    const DEFAULT_SETTINGS = {showPanel: true, playlist: '', autoExpand: false};
+    const DEFAULT_SETTINGS = {showPanel: false, playlist: '', autoExpand: false};
 
     const KIND_INFO = {
         hls: {label: 'HLS', color: '#e2a03f'},
@@ -26,6 +26,7 @@
     let expanded = false;
     let dismissed = false;
     let lastCount = 0;
+    let lastKey = null;
     let rescanButton = null;
     let rescanUntil = 0;
     let rescanTimer = 0;
@@ -353,7 +354,16 @@
 
     function applyItems(next)
     {
-        items = Array.isArray(next) ? next : [];
+        const list = Array.isArray(next) ? next : [];
+
+        // The same list arrives on every media event of the page; rebuilding the card each time
+        // would restart its animation and throw away the names the user is typing.
+        const key = list.map((item) => item.url).join('\n');
+        if (key === lastKey)
+            return;
+
+        lastKey = key;
+        items = list;
         renderPill();
         renderCard();
         updateVisibility();

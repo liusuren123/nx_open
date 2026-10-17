@@ -3,7 +3,8 @@
 // Toolbar popup: the same list of found media as the in-page panel, plus the settings.
 
 const SCHEME = 'nxoptx';
-const DEFAULT_SETTINGS = {showPanel: true, playlist: '', autoExpand: false};
+const DEFAULT_SETTINGS = {showPanel: false, playlist: '', autoExpand: false};
+const REFRESH_INTERVAL_MS = 1000;
 
 const KIND_INFO = {
     hls: {label: 'HLS', color: '#e2a03f'},
@@ -28,6 +29,8 @@ let settings = {...DEFAULT_SETTINGS};
 let items = [];
 let tabId = -1;
 let rescanning = false;
+let lastKey = null;
+let refreshSeq = 0;
 
 function request(message)
 {
@@ -188,8 +191,31 @@ function render()
 
 function apply(next)
 {
-    items = Array.isArray(next) ? next : [];
+    const list = Array.isArray(next) ? next : [];
+
+    // Refreshes come from a timer while the popup is open; rebuilding the list every second would
+    // throw away the names the user is typing.
+    const key = list.map((item) => item.url).join('\n');
+    if (key === lastKey)
+        return;
+
+    lastKey = key;
+    items = list;
     render();
+}
+
+/** The popup is open for a moment only, and polls so it never shows a stale or empty list. */
+async function refresh()
+{
+    if (tabId < 0)
+        return;
+
+    const seq = ++refreshSeq;
+    const reply = await request({type: 'getMedia', tabId});
+    if (seq !== refreshSeq)
+        return; //< A newer refresh is already on its way.
+    if (reply)
+        apply(reply.items);
 }
 
 elements.addAll.addEventListener('click', () =>
@@ -275,6 +301,6 @@ elements.playlist.addEventListener('change', () =>
     }
 
     tabId = tab.id;
-    const reply = await request({type: 'getMedia', tabId});
-    apply(reply ? reply.items : []);
+    await refresh();
+    setInterval(refresh, REFRESH_INTERVAL_MS);
 })();
