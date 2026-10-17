@@ -41,17 +41,23 @@ function request(message)
 
 function suggestedName(item, index)
 {
-    try
+    let base = (item.title || '').trim();
+    if (!base)
     {
-        const parsed = new URL(item.url);
-        const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
-        const base = name || parsed.hostname;
-        return items.length > 1 ? `${base} #${index + 1}` : base;
+        try
+        {
+            const parsed = new URL(item.url);
+            const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
+            base = name || parsed.hostname;
+        }
+        catch (error)
+        {
+            base = item.url;
+        }
     }
-    catch (error)
-    {
-        return item.url;
-    }
+    if (item.label)
+        return `${base} ${item.label}`;
+    return items.length > 1 ? `${base} #${index + 1}` : base;
 }
 
 function buildUri(item, name)

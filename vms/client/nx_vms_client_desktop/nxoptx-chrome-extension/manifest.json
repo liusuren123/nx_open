@@ -3,7 +3,7 @@
   "name": "Nx Optx 媒体嗅探器",
   "version": "1.0.0",
   "description": "嗅探当前页面上的媒体流，并在页面右下角提示，可一键添加到正在运行的 Nx Optx 播放器。",
-  "minimum_chrome_version": "102",
+  "minimum_chrome_version": "111",
 
   "permissions": [
     "webRequest",
@@ -36,6 +36,13 @@
   },
 
   "content_scripts": [
+    {
+      "matches": ["*://*.bilibili.com/*", "*://*.bilibili.tv/*"],
+      "js": ["bilibili-sniffer.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],

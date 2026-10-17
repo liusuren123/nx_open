@@ -33,12 +33,15 @@ python package.py --out <输出路径>.zip
 
 ## 工作原理
 
-扩展从两个来源发现媒体：
+扩展从三个来源发现媒体：
 
 1. **网络请求**：`chrome.webRequest` 观察每个标签页的请求，用响应头 `Content-Type`
    和 URL 后缀一起判断类型；
 2. **页面 DOM**：内容脚本扫描页面上的 `<video>` / `<audio>` / `<source>`，覆盖那些
-   直接从缓存读取、或由脚本动态设置、`webRequest` 看不到的情况。
+   直接从缓存读取、或由脚本动态设置、`webRequest` 看不到的情况；
+3. **页面世界**：有些站点把真正的媒体地址放在自己的 JSON 里，既不在 DOM，也不在能读到内容的请求里
+   （例如哔哩哔哩）。`bilibili-sniffer.js` 运行在页面自己的 JS 环境（MAIN world）里读取这些数据，
+   再把可播的地址通过 `postMessage` 报给内容脚本。
 
 识别出的类型：
 
@@ -61,6 +64,24 @@ python package.py --out <输出路径>.zip
 
 每个标签页的列表在地址栏徽标上显示条数；页面开始加载新文档时清空（SPA 的
 `pushState` 不算）。
+
+## 哔哩哔哩
+
+哔哩哔哩默认用 DASH 播放：视频轨和音轨是**两个独立的 `.m4s` 文件**，`<video>` 上只有 `blob:` 地址，
+所以按普通的「看请求 / 扫 DOM」思路一个可播地址都拿不到。扩展对它的处理是：
+
+1. 从页面状态里取当前视频的 `bvid` / `cid`（分 P 视频会自动带上分 P 标题）；
+2. 调同一个 `playurl` 接口，但要求 `fnval=1`（**渐进式**），得到一个**画面和声音合在一起的 MP4**；
+3. 画质取账号允许的最高档：登录时最高到 1080P，未登录通常是 720P（请求超过权限时接口会自动降档）；
+4. 如果渐进式地址拿不到（会员 / 地区限制等），退回页面自带的播放结果，分别列出视频轨（标注
+   「无音轨」）和音轨。
+
+注意：
+
+* 渐进式地址带时效签名，**放久了会失效**，需要重新嗅探；
+* 渐进式文件比分片大得多（720P 可能几百 MB）；
+* 默认名称是视频标题，画质作为后缀，例如 `标题 720P`；
+* 播放依赖账号的 Cookie，所以登录后的画质就是登录后的档位。
 
 ## 页面右下角面板
 
@@ -104,8 +125,8 @@ nxoptx://addStream?url=<URL 编码的流地址>&name=<URL 编码的名称>&playl
 
 ## 已知限制
 
-* **MSE / DRM 流**：像 YouTube、Netflix 这类用 `MediaSource` 拼帧的站点，真实分片地址
-  在 JS 里，扩展拿不到；这类站点不会出现在列表里。
+* **MSE / DRM 流**：像 YouTube、Netflix 这类用 `MediaSource` 拼帧、又没有渐进式地址的站点，
+  扩展仍然拿不到；哔哩哔哩已经单独支持（见上）。
 * **页面全屏播放时面板不可见**：浏览器全屏只渲染全屏元素，这是浏览器的限制；
   退出全屏或用工具栏弹窗即可。
 * 分片（`.ts` / `.m4s`）被有意过滤掉了；如果某个站点只暴露分片、没有播放列表，
@@ -120,6 +141,7 @@ nxoptx://addStream?url=<URL 编码的流地址>&name=<URL 编码的名称>&playl
 | `manifest.json` | Manifest V3 清单 |
 | `background.js` | Service Worker：嗅探、过滤、去重、徽标、与页面通信 |
 | `content.js` | 内容脚本：右下角面板、DOM 扫描、构造 `nxoptx://` 命令 |
+| `bilibili-sniffer.js` | 页面世界脚本：从哔哩哔哩页面取渐进式播放地址（仅在 bilibili.com / bilibili.tv 注入） |
 | `panel.css` | 面板样式（注入 Shadow DOM） |
 | `popup.html` / `popup.js` / `popup.css` | 工具栏弹窗与设置 |
 | `package.py` | 把扩展打成 `nxoptx-chrome-extension.zip`（单层目录，解压即用） |

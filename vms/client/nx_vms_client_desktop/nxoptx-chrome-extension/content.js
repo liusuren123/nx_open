@@ -107,8 +107,7 @@
 
     function suggestedName(item, index)
     {
-        const title = (document.title || '').replace(/\s+/g, ' ').trim();
-        let base = title;
+        let base = (item.title || document.title || '').replace(/\s+/g, ' ').trim();
         if (!base)
         {
             try
@@ -122,9 +121,13 @@
                 base = item.url;
             }
         }
+        if (item.label)
+            base = `${base} ${item.label}`;
+        else if (items.length > 1)
+            base = `${base} #${index + 1}`;
         if (base.length > 60)
             base = base.slice(0, 59) + '…';
-        return items.length > 1 ? `${base} #${index + 1}` : base;
+        return base;
     }
 
     function buildUri(item, name)
@@ -397,13 +400,36 @@
         return found;
     }
 
-    async function scanAndReport()
+    async function registerItems(found)
     {
-        const found = scanDocument();
+        if (!found.length)
+            return;
+
         const reply = await request({type: 'register', items: found});
         if (reply)
             applyItems(reply.items);
     }
+
+    async function scanAndReport()
+    {
+        await registerItems(scanDocument());
+    }
+
+    // Some players keep their media in their own JSON rather than in the DOM or in requests the
+    // extension can read (Bilibili, for one). A page-world script reports those URLs here; see
+    // bilibili-sniffer.js.
+    window.addEventListener('message', (event) =>
+    {
+        if (event.source !== window)
+            return;
+        const data = event.data;
+        if (!data || data.source !== 'nxoptx-page' || data.type !== 'media')
+            return;
+        registerItems(Array.isArray(data.items) ? data.items : []);
+    });
+
+    // The page-world script may have found something before this script started.
+    window.postMessage({source: 'nxoptx-content', type: 'hello'}, '*');
 
     const initial = await request({type: 'getMedia'});
     if (initial)

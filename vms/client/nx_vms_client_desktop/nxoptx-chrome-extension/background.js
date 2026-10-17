@@ -61,13 +61,16 @@ function classify(url, mime)
     return null;
 }
 
-function isUsableUrl(url)
+/** Kinds a page-world sniffer may assign to a resource. */
+const PAGE_KINDS = new Set(['hls', 'dash', 'video', 'audio']);
+
+function isUsableUrl(url, allowSegment)
 {
     if (!url)
         return false;
     if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('mediasource:'))
         return false;
-    if (SEGMENT_EXT.test(url))
+    if (!allowSegment && SEGMENT_EXT.test(url))
         return false;
     return /^https?:\/\//i.test(url);
 }
@@ -78,13 +81,20 @@ function itemsFor(tabId)
     return items ? [...items.values()] : [];
 }
 
-/** Remembers a resource. Returns whether the list actually changed. */
-function remember(tabId, url, mime)
+/**
+ * Remembers a resource. Returns whether the list actually changed.
+ *
+ * `hint` carries what a page-world sniffer knows about the resource: it names the kind, because a
+ * DASH track ends in .m4s and would otherwise be taken for a fragment, and adds the name and the
+ * quality label to show.
+ */
+function remember(tabId, url, mime, hint)
 {
-    if (tabId < 0 || !isUsableUrl(url))
+    const hintedKind = hint && PAGE_KINDS.has(hint.kind) ? hint.kind : null;
+    if (tabId < 0 || !isUsableUrl(url, !!hintedKind))
         return false;
 
-    const kind = classify(url, mime);
+    const kind = hintedKind || classify(url, mime);
     if (!kind)
         return false;
 
@@ -98,20 +108,39 @@ function remember(tabId, url, mime)
     const existing = items.get(url);
     if (existing)
     {
-        // The same URL may have been seen first without a useful content type.
+        // The same URL may have been seen first without a useful content type, or before the page
+        // told us what it is.
+        let changed = false;
         if (!existing.mime && mime)
         {
             existing.mime = mime;
             existing.kind = kind;
-            return true;
+            changed = true;
         }
-        return false;
+        if (!existing.title && hint && hint.title)
+        {
+            existing.title = hint.title;
+            changed = true;
+        }
+        if (!existing.label && hint && hint.label)
+        {
+            existing.label = hint.label;
+            changed = true;
+        }
+        return changed;
     }
 
     if (items.size >= MAX_ITEMS_PER_TAB)
         return false;
 
-    items.set(url, {url, kind, mime: mime || '', foundAt: Date.now()});
+    items.set(url, {
+        url,
+        kind,
+        mime: mime || '',
+        title: (hint && hint.title) || '',
+        label: (hint && hint.label) || '',
+        foundAt: Date.now(),
+    });
     return true;
 }
 
@@ -248,7 +277,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
         {
             let changed = false;
             for (const item of message.items || [])
-                changed = remember(tabId, item.url, item.mime) || changed;
+                changed = remember(tabId, item.url, item.mime, item) || changed;
             if (changed)
                 scheduleRefresh(tabId);
             return {items: itemsFor(tabId)};
