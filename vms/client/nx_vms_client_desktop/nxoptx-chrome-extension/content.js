@@ -143,16 +143,41 @@
     }
 
     /**
-     * A batch is one command, not one command per item: the browser may only start one external
-     * protocol navigation at a time, so separate launches cancel each other and only the last stream
-     * would arrive.
+     * Chrome refuses to start an external protocol navigation for a URL longer than about 2 KB, and
+     * a batch of stream addresses is easily longer. The payload is therefore deflated and
+     * base64-encoded; Qt's qUncompress() expects the uncompressed size as a big-endian 32-bit
+     * prefix.
      */
-    function buildBatchUri(entries)
+    async function packPayload(text)
+    {
+        const bytes = new TextEncoder().encode(text);
+        const compressed = new Uint8Array(await new Response(
+            new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate')))
+            .arrayBuffer());
+
+        const packed = new Uint8Array(4 + compressed.length);
+        new DataView(packed.buffer).setUint32(0, bytes.length, false);
+        packed.set(compressed, 4);
+
+        let binary = '';
+        for (let i = 0; i < packed.length; i += 0x8000)
+            binary += String.fromCharCode(...packed.subarray(i, i + 0x8000));
+
+        return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+    }
+
+    /**
+     * A batch is one command, not one command per item: the browser may only start one external
+     * protocol navigation at a time, so separate launches cancel each other and only the last
+     * stream would arrive.
+     */
+    async function buildBatchUri(entries)
     {
         const payload = JSON.stringify(entries.map(({url, name}) => ({url, name})));
+        const packed = await packPayload(payload);
         const playlist = settings.playlist.trim();
         const encode = encodeURIComponent;
-        return `${SCHEME}://addStreams?items=${encode(payload)}`
+        return `${SCHEME}://addStreams?data=${encode(packed)}`
             + (playlist ? `&playlist=${encode(playlist)}` : '');
     }
 
@@ -311,7 +336,7 @@
         addAll.className = 'nx-primary';
         addAll.type = 'button';
         addAll.textContent = '全部添加';
-        addAll.addEventListener('click', () =>
+        addAll.addEventListener('click', async () =>
         {
             if (!items.length)
                 return;
@@ -323,7 +348,7 @@
                 return {url: item.url, name: input?.value.trim() || suggestedName(item, index)};
             });
 
-            openUri(buildBatchUri(entries));
+            openUri(await buildBatchUri(entries));
 
             for (const row of rows)
                 setStatus(row, '已发送到播放器', false);

@@ -50,7 +50,7 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 | `setCurrentPlaylist` | 设为“当前播放列表” | `playlist` |
 | `addFile` | 加入本地文件/文件夹 | `playlist`, `path` 或 `paths` |
 | `addStream` | 加入网络流并指定显示名称 | `playlist`, `url`, `name`, `username`, `password` |
-| `addStreams` | 一次加入多条网络流 | `playlist`, `items`（JSON 数组，元素字段同 `addStream`） |
+| `addStreams` | 一次加入多条网络流 | `playlist`, `items` 或 `data`（见下） |
 | `removeEntry` | 删除某一行 | `playlist`, `row` |
 
 字段说明：
@@ -63,6 +63,9 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 * `items`：多条流的 JSON 数组，每个元素是 `{"url": "...", "name": "..."}`（也支持
   `username` / `password` / `title`）。用于“全部添加”：浏览器的外部协议跳转同一时间只能进行
   一个，逐条跳转会被后一条取消，所以批量添加必须是一条命令。
+* `data`：与 `items` 相同的 JSON，但先做 zlib 压缩，前面加 4 字节大端未压缩长度，再 base64url
+  编码。浏览器拒绝为超过约 2 KB 的外部协议 URL 发起跳转，几条流地址就会超过这个限制，所以
+  “全部添加”发的是 `data`。手写请求和套接字协议用明文 `items` 即可。
 
 ## 响应
 
@@ -140,7 +143,7 @@ nxoptx://playlists?reply=C:\Temp\playlists.json
 nxoptx://createPlaylist?name=My%20list
 nxoptx://addFile?playlist=My%20list&path=D%3A%2Fvideos%2Fmovie.mp4
 nxoptx://addStream?playlist=My%20list&url=rtsp%3A%2F%2F192.168.1.50%3A554%2Fstream&name=%E5%89%8D%E9%97%A8
-nxoptx://addStreams?items=%5B%7B%22url%22%3A%22rtsp%3A%2F%2Fa%2Fb%22%2C%22name%22%3A%22A%22%7D%5D
+nxoptx://addStreams?data=<base64url 编码的压缩 JSON>&playlist=My%20list
 ```
 
 ## 注意

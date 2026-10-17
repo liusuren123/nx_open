@@ -4,6 +4,7 @@
 
 #include <cstdio>
 
+#include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -35,6 +36,7 @@ const auto kPath = QStringLiteral("path");
 const auto kPaths = QStringLiteral("paths");
 const auto kUrl = QStringLiteral("url");
 const auto kItems = QStringLiteral("items");
+const auto kData = QStringLiteral("data");
 const auto kUsername = QStringLiteral("username");
 const auto kPassword = QStringLiteral("password");
 const auto kRow = QStringLiteral("row");
@@ -303,11 +305,27 @@ QJsonObject addStreams(PlaylistManager* playlists, const QJsonObject& request)
     if (id.isEmpty())
         return failure(QStringLiteral("playlistNotFound"));
 
-    const QString payload = stringValue(request, kItems);
+    // A browser refuses to pass an external protocol URL longer than about 2 KB, and a handful of
+    // stream addresses easily exceeds that, so the extension sends the payload compressed. Plain
+    // `items` is still accepted for hand-written requests and for the socket protocol.
+    QByteArray payload;
+    const QString plainItems = stringValue(request, kItems);
+    if (!plainItems.isEmpty())
+    {
+        payload = plainItems.toUtf8();
+    }
+    else if (const QString packed = stringValue(request, kData); !packed.isEmpty())
+    {
+        // qUncompress() expects the uncompressed size as a big-endian 32-bit prefix, which is
+        // exactly what the extension prepends to the deflate stream.
+        payload = qUncompress(QByteArray::fromBase64(packed.toLatin1(),
+            QByteArray::Base64UrlEncoding));
+    }
+
     if (payload.isEmpty())
         return failure(QStringLiteral("noItems"));
 
-    const QJsonDocument document = QJsonDocument::fromJson(payload.toUtf8());
+    const QJsonDocument document = QJsonDocument::fromJson(payload);
     if (!document.isArray())
         return failure(QStringLiteral("invalidItems"));
 
