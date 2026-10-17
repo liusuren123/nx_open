@@ -18,6 +18,7 @@ const elements = {
     list: document.getElementById('list'),
     empty: document.getElementById('empty'),
     addAll: document.getElementById('addAll'),
+    rescan: document.getElementById('rescan'),
     showPanel: document.getElementById('showPanel'),
     autoExpand: document.getElementById('autoExpand'),
     playlist: document.getElementById('playlist'),
@@ -26,6 +27,7 @@ const elements = {
 let settings = {...DEFAULT_SETTINGS};
 let items = [];
 let tabId = -1;
+let rescanning = false;
 
 function request(message)
 {
@@ -177,6 +179,7 @@ function render()
     elements.empty.style.display = hasItems ? 'none' : 'block';
     elements.addAll.disabled = !hasItems;
     elements.clear.disabled = !hasItems;
+    elements.rescan.disabled = tabId < 0 || rescanning;
 
     elements.subtitle.textContent = hasItems
         ? `发现 ${items.length} 个媒体资源`
@@ -207,6 +210,39 @@ elements.clear.addEventListener('click', async () =>
     const reply = await request({type: 'clear', tabId});
     if (reply)
         apply(reply.items);
+});
+
+/** The popup cannot run the sniffer itself, so it asks the content script of the tab to do it. */
+elements.rescan.addEventListener('click', async () =>
+{
+    if (tabId < 0)
+        return;
+
+    elements.rescan.disabled = true;
+    elements.rescan.textContent = '扫描中…';
+    rescanning = true;
+    try
+    {
+        await chrome.tabs.sendMessage(tabId, {type: 'rescan'});
+    }
+    catch (error)
+    {
+        // A restricted page, or a document without the content script.
+        elements.subtitle.textContent = '这个页面无法重新扫描';
+    }
+    setTimeout(() =>
+    {
+        rescanning = false;
+        elements.rescan.disabled = tabId < 0;
+        elements.rescan.textContent = '重新扫描当前页面';
+    }, 1000);
+});
+
+// The background tells every extension page, including this one, when the list of a tab changes.
+chrome.runtime.onMessage.addListener((message) =>
+{
+    if (message?.type === 'mediaUpdated' && message.tabId === tabId)
+        apply(message.items);
 });
 
 for (const key of ['showPanel', 'autoExpand'])

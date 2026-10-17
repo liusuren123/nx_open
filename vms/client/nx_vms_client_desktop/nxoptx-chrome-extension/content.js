@@ -26,6 +26,9 @@
     let expanded = false;
     let dismissed = false;
     let lastCount = 0;
+    let rescanButton = null;
+    let rescanUntil = 0;
+    let rescanTimer = 0;
 
     // ---------------------------------------------------------------- messaging
 
@@ -303,6 +306,13 @@
             });
         });
 
+        rescanButton = document.createElement('button');
+        rescanButton.className = 'nx-ghost';
+        rescanButton.type = 'button';
+        rescanButton.title = '重新扫描当前页面的媒体资源';
+        rescanButton.addEventListener('click', () => rescan());
+        updateRescanButton();
+
         const clear = document.createElement('button');
         clear.className = 'nx-ghost';
         clear.type = 'button';
@@ -317,7 +327,7 @@
         hint.className = 'nx-hint';
         hint.textContent = '需要播放器正在运行';
 
-        foot.append(addAll, clear, hint);
+        foot.append(addAll, rescanButton, clear, hint);
         card.append(head, playlistRow, list, foot);
     }
 
@@ -364,10 +374,15 @@
     settings = {...DEFAULT_SETTINGS, ...(await chrome.storage.sync.get(DEFAULT_SETTINGS))};
     expanded = settings.autoExpand;
 
-    chrome.runtime.onMessage.addListener((message) =>
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
     {
         if (message?.type === 'mediaUpdated')
             applyItems(message.items);
+        else if (message?.type === 'rescan')
+        {
+            rescan();
+            sendResponse({ok: true}); //< The popup awaits the reply.
+        }
     });
 
     chrome.storage.onChanged.addListener((changes, area) =>
@@ -400,12 +415,13 @@
         return found;
     }
 
-    async function registerItems(found)
+    async function registerItems(found, options)
     {
-        if (!found.length)
+        const {origin = 'dom', replace = false} = options || {};
+        if (!found.length && !replace)
             return;
 
-        const reply = await request({type: 'register', items: found});
+        const reply = await request({type: 'register', items: found, origin, replace});
         if (reply)
             applyItems(reply.items);
     }
@@ -413,6 +429,30 @@
     async function scanAndReport()
     {
         await registerItems(scanDocument());
+    }
+
+    function updateRescanButton()
+    {
+        if (!rescanButton || !rescanButton.isConnected)
+            return;
+        const busy = Date.now() < rescanUntil;
+        rescanButton.disabled = busy;
+        rescanButton.textContent = busy ? '扫描中…' : '重新扫描';
+    }
+
+    /**
+     * Re-runs both sniffers: the DOM one and the page-world one. Each source replaces what it
+     * reported before, because a signed stream address stops working after a while.
+     */
+    async function rescan()
+    {
+        rescanUntil = Date.now() + 1200;
+        updateRescanButton();
+        clearTimeout(rescanTimer);
+        rescanTimer = setTimeout(updateRescanButton, 1200);
+
+        await registerItems(scanDocument(), {origin: 'dom', replace: true});
+        window.postMessage({source: 'nxoptx-content', type: 'rescan'}, '*');
     }
 
     // Some players keep their media in their own JSON rather than in the DOM or in requests the
@@ -425,7 +465,8 @@
         const data = event.data;
         if (!data || data.source !== 'nxoptx-page' || data.type !== 'media')
             return;
-        registerItems(Array.isArray(data.items) ? data.items : []);
+        registerItems(Array.isArray(data.items) ? data.items : [],
+            {origin: 'page', replace: true});
     });
 
     // The page-world script may have found something before this script started.

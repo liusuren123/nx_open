@@ -251,13 +251,31 @@
     }
     window.addEventListener('popstate', scanSoon);
 
-    // content.js may start after this script has found something.
+    // content.js may start after this script has found something, and may ask for a fresh search
+    // when the addresses it reported have expired.
     window.addEventListener('message', (event) =>
     {
         if (event.source !== window)
             return;
         const data = event.data;
-        if (data && data.source === CONTENT_SOURCE && data.type === 'hello' && items.length)
-            post();
+        if (!data || data.source !== CONTENT_SOURCE)
+            return;
+
+        if (data.type === 'hello')
+        {
+            if (items.length)
+                post();
+            return;
+        }
+
+        if (data.type === 'rescan')
+        {
+            // Start over: the address reported before carries a signature that may have expired,
+            // so the new answer replaces it rather than joining it.
+            reported.clear();
+            items.length = 0;
+            lastVideoKey = '';
+            scan();
+        }
     });
 })();

@@ -94,6 +94,10 @@ function remember(tabId, url, mime, hint)
     if (tabId < 0 || !isUsableUrl(url, !!hintedKind))
         return false;
 
+    // Where the resource was found: a request, the page's DOM, or a page-world sniffer. A rescan
+    // replaces the entries of the source it re-scanned and leaves the others alone.
+    const origin = hint && (hint.origin === 'dom' || hint.origin === 'page') ? hint.origin : 'net';
+
     const kind = hintedKind || classify(url, mime);
     if (!kind)
         return false;
@@ -127,6 +131,12 @@ function remember(tabId, url, mime, hint)
             existing.label = hint.label;
             changed = true;
         }
+        // The page knows the resource better than a request does, so it takes over the entry.
+        if (origin === 'page' && existing.origin !== 'page')
+        {
+            existing.origin = 'page';
+            changed = true;
+        }
         return changed;
     }
 
@@ -139,6 +149,7 @@ function remember(tabId, url, mime, hint)
         mime: mime || '',
         title: (hint && hint.title) || '',
         label: (hint && hint.label) || '',
+        origin,
         foundAt: Date.now(),
     });
     return true;
@@ -174,6 +185,17 @@ async function refreshTab(tabId)
     catch (error)
     {
         // No content script in this tab: a restricted page, or the document is still loading.
+    }
+
+    // The toolbar popup shows the same list, and may be open at this moment.
+    try
+    {
+        chrome.runtime.sendMessage({type: 'mediaUpdated', tabId, items},
+            () => void chrome.runtime.lastError);
+    }
+    catch (error)
+    {
+        // Nobody is listening.
     }
 }
 
@@ -276,8 +298,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
         if (message?.type === 'register')
         {
             let changed = false;
+
+            // A rescan replaces what the same source reported before: a stream address carries a
+            // signature that expires, so the new answer is a fresh address, not another resource.
+            const origin = message.origin === 'page' || message.origin === 'dom'
+                ? message.origin
+                : 'net';
+            const items = mediaByTab.get(tabId);
+            if (message.replace && origin !== 'net' && items)
+            {
+                for (const [url, item] of [...items])
+                {
+                    if (item.origin === origin || (origin === 'page' && item.page))
+                    {
+                        items.delete(url);
+                        changed = true;
+                    }
+                }
+            }
+
             for (const item of message.items || [])
-                changed = remember(tabId, item.url, item.mime, item) || changed;
+                changed = remember(tabId, item.url, item.mime, {...item, origin}) || changed;
             if (changed)
                 scheduleRefresh(tabId);
             return {items: itemsFor(tabId)};
