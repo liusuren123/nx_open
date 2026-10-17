@@ -34,6 +34,7 @@ const auto kTitle = QStringLiteral("title");
 const auto kPath = QStringLiteral("path");
 const auto kPaths = QStringLiteral("paths");
 const auto kUrl = QStringLiteral("url");
+const auto kItems = QStringLiteral("items");
 const auto kUsername = QStringLiteral("username");
 const auto kPassword = QStringLiteral("password");
 const auto kRow = QStringLiteral("row");
@@ -54,6 +55,7 @@ const QStringList& knownActions()
         QStringLiteral("setCurrentPlaylist"),
         QStringLiteral("addFile"),
         QStringLiteral("addStream"),
+        QStringLiteral("addStreams"),
         QStringLiteral("renameEntry"),
         QStringLiteral("removeEntry"),
     };
@@ -289,6 +291,61 @@ QJsonObject addStream(PlaylistManager* playlists, const QJsonObject& request)
         {kName, entry.title}};
 }
 
+/**
+ * Adds several streams at once. The items come as a JSON array in the `items` parameter, each one an
+ * object with the same fields as a single addStream request: url, name (or title), username and
+ * password. One command per click keeps a batch of streams from competing for the one external
+ * protocol navigation a browser may allow at a time.
+ */
+QJsonObject addStreams(PlaylistManager* playlists, const QJsonObject& request)
+{
+    const QString id = resolvePlaylistId(playlists, request);
+    if (id.isEmpty())
+        return failure(QStringLiteral("playlistNotFound"));
+
+    const QString payload = stringValue(request, kItems);
+    if (payload.isEmpty())
+        return failure(QStringLiteral("noItems"));
+
+    const QJsonDocument document = QJsonDocument::fromJson(payload.toUtf8());
+    if (!document.isArray())
+        return failure(QStringLiteral("invalidItems"));
+
+    QList<PlaylistEntry> entries;
+    for (const QJsonValue& value: document.array())
+    {
+        const QJsonObject item = value.toObject();
+        const QString url = stringValue(item, kUrl).trimmed();
+        if (url.isEmpty())
+            continue;
+
+        PlaylistEntry entry;
+        entry.url = url;
+        entry.username = stringValue(item, kUsername);
+        entry.password = stringValue(item, kPassword);
+
+        QString title = stringValue(item, kName).trimmed();
+        if (title.isEmpty())
+            title = stringValue(item, kTitle).trimmed();
+        entry.title = title.isEmpty() ? url : title;
+        entries.append(entry);
+    }
+
+    if (entries.isEmpty())
+        return failure(QStringLiteral("noItems"));
+
+    const int firstRow = playlists->playlist(id).entries.size();
+    if (!playlists->addEntries(id, entries))
+        return failure(QStringLiteral("addFailed"));
+
+    return {
+        {kOk, true},
+        {kPlaylist, id},
+        {QStringLiteral("firstRow"), firstRow},
+        {QStringLiteral("lastRow"), firstRow + entries.size() - 1},
+        {QStringLiteral("count"), entries.size()}};
+}
+
 QJsonObject renameEntry(PlaylistManager* playlists, const QJsonObject& request)
 {
     const QString id = resolvePlaylistId(playlists, request);
@@ -385,6 +442,8 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists)
         return addFile(playlists, request);
     if (action == QLatin1String("addStream"))
         return addStream(playlists, request);
+    if (action == QLatin1String("addStreams"))
+        return addStreams(playlists, request);
     if (action == QLatin1String("renameEntry"))
         return renameEntry(playlists, request);
     if (action == QLatin1String("removeEntry"))

@@ -74,6 +74,20 @@ function buildUri(item, name)
 }
 
 /**
+ * A batch is one command, not one command per item: the browser may only start one external
+ * protocol navigation at a time, so separate launches cancel each other and only the last stream
+ * would arrive.
+ */
+function buildBatchUri(entries)
+{
+    const payload = JSON.stringify(entries.map(({url, name}) => ({url, name})));
+    const playlist = settings.playlist.trim();
+    const encode = encodeURIComponent;
+    return `${SCHEME}://addStreams?items=${encode(payload)}`
+        + (playlist ? `&playlist=${encode(playlist)}` : '');
+}
+
+/**
  * Hands the command to the browser, which passes it to the player through the registered
  * nxoptx:// handler.
  *
@@ -240,15 +254,20 @@ async function refresh()
 
 elements.addAll.addEventListener('click', () =>
 {
+    if (!items.length)
+        return;
+
     const rows = [...elements.list.children];
-    items.forEach((item, index) =>
+    const entries = items.map((item, index) =>
     {
         const input = rows[index]?.querySelector('.name');
-        const name = input?.value.trim() || suggestedName(item, index);
-        openUri(buildUri(item, name));
-        if (rows[index])
-            setStatus(rows[index], '已发送到播放器', false);
+        return {url: item.url, name: input?.value.trim() || suggestedName(item, index)};
     });
+
+    openUri(buildBatchUri(entries));
+
+    for (const row of rows)
+        setStatus(row, '已发送到播放器', false);
 });
 
 elements.clear.addEventListener('click', async () =>
