@@ -126,7 +126,7 @@ async function openUri(uri)
         try
         {
             await chrome.tabs.update(tabId, {url: uri});
-            return;
+            return 'tab';
         }
         catch (error)
         {
@@ -140,6 +140,7 @@ async function openUri(uri)
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
+    return 'anchor';
 }
 
 function setStatus(container, text, isError)
@@ -288,9 +289,21 @@ elements.addAll.addEventListener('click', async () =>
         return {url: item.url, name: input?.value.trim() || suggestedName(item, index)};
     });
 
-    openUri(await buildBatchUri(entries));
+    try
+    {
+        const uri = await buildBatchUri(entries);
+        await openUri(uri);
+        // The length is shown on purpose: a command over ~2 KB is silently ignored by Chrome.
+        setStatus(rows[0], `已发送 ${entries.length} 条（命令 ${uri.length} 字符）`,
+            uri.length > 1900);
+    }
+    catch (error)
+    {
+        setStatus(rows[0], `批量添加失败：${error?.message || error}`, true);
+        return;
+    }
 
-    for (const row of rows)
+    for (const row of rows.slice(1))
         setStatus(row, '已发送到播放器', false);
 });
 
