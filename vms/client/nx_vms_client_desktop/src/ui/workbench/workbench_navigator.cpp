@@ -1758,29 +1758,30 @@ void QnWorkbenchNavigator::updateSliderFromReader(UpdateSliderMode mode)
     }
     m_timelineWindowIsNearLive = timelineWindowIsNearLive;
 
+    const auto mediaResource = m_currentMediaWidget->resource().dynamicCast<QnMediaResource>();
+
+    // A finite client-side source knows its own length, even while its reader is momentarily
+    // closed (it reports an empty range then). Taking that empty answer would collapse the
+    // timeline to the minimal window, so keep the known length instead.
+    if (mediaResource)
+    {
+        if (const auto range = mediaResource->localFileRangeUs())
+        {
+            if (endTimeMSec <= startTimeMSec)
+            {
+                startTimeMSec = range->first / 1000;
+                endTimeMSec = range->second / 1000;
+            }
+        }
+    }
+
     NX_TRACE(this, "Updating slider from reader. IsLiveSuppored: %1", isLiveSupportedInReader);
     m_timeSlider->setTimeRange(milliseconds(startTimeMSec), milliseconds(endTimeMSec));
 
-    // A client-side source with a finite duration (a local file, or a file streamed over the
-    // network, such as a VOD playlist) has neither a growing archive nor a live edge, so show its
-    // whole length at once. A live stream reports no local file range and is left as is. Fitting is
-    // done only when the length is first learned, so that the user can zoom in and pan freely
-    // afterwards.
-    if (const auto mediaResource =
-        m_currentMediaWidget->resource().dynamicCast<QnMediaResource>())
-    {
-        if (mediaResource->localFileRangeUs().has_value()
-            && endTimeMSec > startTimeMSec
-            && endTimeMSec != m_localFileRangeFittedMs)
-        {
-            m_localFileRangeFittedMs = endTimeMSec;
-            NX_INFO(this, "Fitting the timeline window to the whole %1 s long local file source.",
-                (endTimeMSec - startTimeMSec) / 1000);
-            m_timeSlider->finishAnimations();
-            m_timeSlider->setWindow(m_timeSlider->minimum(), m_timeSlider->maximum(),
-                /*animate*/ false, /*forceResize*/ true);
-        }
-    }
+    // Forget the fitted length when no finite range is known at all, so that the whole range is
+    // fitted again as soon as the reader is back.
+    if (endTimeMSec <= startTimeMSec)
+        m_localFileRangeFittedMs = -1;
 
     if (m_calendar)
     {
@@ -1976,6 +1977,26 @@ void QnWorkbenchNavigator::updateSliderFromReader(UpdateSliderMode mode)
         // #spanasenko: A call to updateTimelineRelevancy() has been removed from here
         // because it led to incorrect state of 'LIVE' button for currently recording cameras.
         // Additional research or refactoring may be needed.
+    }
+
+    // A client-side source with a finite duration (a local file, or a file streamed over the
+    // network, such as a VOD playlist) has neither a growing archive nor a live edge, so show its
+    // whole length at once. A live stream reports no local file range and is left as is. Fitting is
+    // done once per range, so that the user can zoom in and pan freely afterwards. It is done after
+    // the item data is restored, because that data may hold an older window.
+    if (m_currentMediaWidget && mediaResource)
+    {
+        if (mediaResource->localFileRangeUs().has_value()
+            && endTimeMSec > startTimeMSec
+            && endTimeMSec != m_localFileRangeFittedMs)
+        {
+            m_localFileRangeFittedMs = endTimeMSec;
+            NX_INFO(this, "Fitting the timeline window to the whole %1 s long local file source.",
+                (endTimeMSec - startTimeMSec) / 1000);
+            m_timeSlider->finishAnimations();
+            m_timeSlider->setWindow(m_timeSlider->minimum(), m_timeSlider->maximum(),
+                /*animate*/ false, /*forceResize*/ true);
+        }
     }
 }
 
