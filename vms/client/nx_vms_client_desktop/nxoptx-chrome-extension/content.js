@@ -109,8 +109,14 @@
         status.__nxTimer = setTimeout(() => { status.textContent = ''; }, 4000);
     }
 
-    function suggestedName(item, index)
+    function suggestedName(item)
     {
+        const stored = (item.name || '').replace(/\s+/g, ' ').trim();
+        if (stored)
+            return stored;
+
+        // Entries remembered before names were stored have none; derive one the same way the
+        // background does.
         let base = (item.title || document.title || '').replace(/\s+/g, ' ').trim();
         if (!base)
         {
@@ -127,8 +133,6 @@
         }
         if (item.label)
             base = `${base} ${item.label}`;
-        else if (items.length > 1)
-            base = `${base} #${index + 1}`;
         if (base.length > 60)
             base = base.slice(0, 59) + '…';
         return base;
@@ -197,7 +201,7 @@
 
     function addItem(item, name, row)
     {
-        openUri(buildUri(item, name || suggestedName(item, 0)));
+        openUri(buildUri(item, name || suggestedName(item)));
         setStatus(row, '已发送到播放器', false);
     }
 
@@ -233,8 +237,22 @@
         const name = document.createElement('input');
         name.className = 'nx-name';
         name.type = 'text';
-        name.value = suggestedName(item, index);
+        name.value = suggestedName(item);
         name.title = '在播放器里显示的名称';
+
+        // The list outlives the page, so a name the user types has to be stored as well.
+        name.addEventListener('input', () =>
+        {
+            const target = items.find((candidate) => candidate.url === item.url);
+            if (target)
+                target.name = name.value;
+
+            clearTimeout(name.renameTimer);
+            name.renameTimer = setTimeout(() =>
+            {
+                request({type: 'rename', url: item.url, name: name.value});
+            }, 400);
+        });
 
         const remove = document.createElement('button');
         remove.className = 'nx-icon';
@@ -345,7 +363,7 @@
             const entries = items.map((item, index) =>
             {
                 const input = rows[index]?.querySelector('.nx-name');
-                return {url: item.url, name: input?.value.trim() || suggestedName(item, index)};
+                return {url: item.url, name: input?.value.trim() || suggestedName(item)};
             });
 
             openUri(await buildBatchUri(entries));
@@ -367,7 +385,7 @@
         clear.textContent = '清空';
         clear.addEventListener('click', async () =>
         {
-            const reply = await request({type: 'clear'});
+            const reply = await request({type: 'clear', pageUrl: location.href});
             applyItems(reply ? reply.items : []);
         });
 
@@ -401,7 +419,10 @@
 
     function applyItems(next)
     {
-        const list = Array.isArray(next) ? next : [];
+        // The background keeps one list for the whole browser; the panel shows the resources that
+        // were found in this document.
+        const list = (Array.isArray(next) ? next : []).filter(
+            (item) => !item.pageUrl || item.pageUrl === location.href);
 
         // The same list arrives on every media event of the page; rebuilding the card each time
         // would restart its animation and throw away the names the user is typing.
@@ -478,7 +499,8 @@
         if (!found.length && !replace)
             return;
 
-        const reply = await request({type: 'register', items: found, origin, replace});
+        const reply = await request({type: 'register', items: found, origin, replace,
+            pageUrl: location.href, pageTitle: document.title});
         if (reply)
             applyItems(reply.items);
     }

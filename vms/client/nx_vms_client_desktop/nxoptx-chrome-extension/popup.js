@@ -28,6 +28,7 @@ const elements = {
 let settings = {...DEFAULT_SETTINGS};
 let items = [];
 let tabId = -1;
+let pageTitle = '';
 let rescanning = false;
 let lastKey = null;
 let refreshSeq = 0;
@@ -44,9 +45,15 @@ function request(message)
     });
 }
 
-function suggestedName(item, index)
+function suggestedName(item)
 {
-    let base = (item.title || '').trim();
+    const stored = (item.name || '').replace(/\s+/g, ' ').trim();
+    if (stored)
+        return stored;
+
+    // Entries remembered before names were stored have none; derive one the same way the
+    // background does. The page title beats the address, which often ends in something opaque.
+    let base = (item.title || pageTitle || '').replace(/\s+/g, ' ').trim();
     if (!base)
     {
         try
@@ -61,8 +68,8 @@ function suggestedName(item, index)
         }
     }
     if (item.label)
-        return `${base} ${item.label}`;
-    return items.length > 1 ? `${base} #${index + 1}` : base;
+        base = `${base} ${item.label}`;
+    return base.length > 60 ? `${base.slice(0, 59)}…` : base;
 }
 
 function buildUri(item, name)
@@ -206,8 +213,22 @@ function renderItem(item, index)
     const name = document.createElement('input');
     name.className = 'name';
     name.type = 'text';
-    name.value = suggestedName(item, index);
+    name.value = suggestedName(item);
     name.title = '在播放器里显示的名称';
+
+    // The list outlives the page, so a name the user types has to be stored as well.
+    name.addEventListener('input', () =>
+    {
+        const target = items.find((candidate) => candidate.url === item.url);
+        if (target)
+            target.name = name.value;
+
+        clearTimeout(name.renameTimer);
+        name.renameTimer = setTimeout(() =>
+        {
+            request({type: 'rename', url: item.url, name: name.value});
+        }, 400);
+    });
 
     top.append(kind, name);
 
@@ -225,7 +246,7 @@ function renderItem(item, index)
     add.textContent = '添加到播放器';
     add.addEventListener('click', () =>
     {
-        openUri(buildUri(item, name.value.trim() || suggestedName(item, index)));
+        openUri(buildUri(item, name.value.trim() || suggestedName(item)));
         setStatus(row, '已发送到播放器', false);
     });
 
@@ -279,8 +300,8 @@ function render()
     elements.rescan.disabled = tabId < 0 || rescanning;
 
     elements.subtitle.textContent = hasItems
-        ? `发现 ${items.length} 个媒体资源`
-        : '还没有发现媒体资源';
+        ? `已记录 ${items.length} 个媒体资源`
+        : '还没有记录媒体资源';
 }
 
 function apply(next)
@@ -321,7 +342,7 @@ elements.addAll.addEventListener('click', async () =>
     const entries = items.map((item, index) =>
     {
         const input = rows[index]?.querySelector('.name');
-        return {url: item.url, name: input?.value.trim() || suggestedName(item, index)};
+        return {url: item.url, name: input?.value.trim() || suggestedName(item)};
     });
 
     try
@@ -392,7 +413,7 @@ elements.rescan.addEventListener('click', async () =>
 // The background tells every extension page, including this one, when the list of a tab changes.
 chrome.runtime.onMessage.addListener((message) =>
 {
-    if (message?.type === 'mediaUpdated' && message.tabId === tabId)
+    if (message?.type === 'mediaUpdated')
         apply(message.items);
 });
 
@@ -426,6 +447,7 @@ elements.playlist.addEventListener('change', () =>
     }
 
     tabId = tab.id;
+    pageTitle = (tab.title || '').trim();
     await refresh();
     setInterval(refresh, REFRESH_INTERVAL_MS);
 })();
