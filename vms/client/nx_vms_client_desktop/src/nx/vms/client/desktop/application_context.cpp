@@ -69,6 +69,7 @@
 #include <nx/vms/client/desktop/resource/resource_factory.h>
 #include <nx/vms/client/desktop/iptv/iptv_manager.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/resource/local_camera/hls_vod_source.h>
 #include <nx/vms/client/desktop/resource/local_camera/local_camera_manager.h>
 #include <nx/vms/client/desktop/resource/local_camera/stream_cache.h>
 #include <nx/vms/client/desktop/resource/resources_changes_manager.h>
@@ -817,10 +818,17 @@ ApplicationContext::ApplicationContext(
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
             // Serves the nxoptx protocol, through which external programs can inspect and fill the
             // playlists, and registers the matching URI handler.
-            d->nxOptxServer = std::make_unique<NxOptxServer>(d->playlistManager.get());
+            d->nxOptxServer = std::make_unique<NxOptxServer>(
+                d->playlistManager.get(), d->localSettings.get());
             d->localCameraManager = std::make_unique<LocalCameraManager>(d->localSettings.get());
             d->iptvManager = std::make_unique<IptvManager>(d->localSettings.get());
             d->streamCache = std::make_unique<StreamCache>(d->localSettings.get());
+
+            // The connection count of an HLS source is fixed when it is created, so the idle sources
+            // are dropped when the setting changes and the next playback picks up the new value.
+            connect(&d->localSettings->streamPrefetchConnections,
+                &nx::utils::property_storage::BaseProperty::changed, this,
+                [] { HlsVodSource::forgetIdleSources(); });
             d->webPageDataCache = std::make_unique<WebPageDataCache>();
             d->qtBugWorkarounds = std::make_unique<QnQtbugWorkaround>();
             if (!startupParameters.localMode)

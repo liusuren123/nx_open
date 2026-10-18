@@ -20,6 +20,7 @@
 #include <nx/utils/log/log.h>
 #include <nx/vms/client/desktop/playlists/playlist.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
 
 namespace nx::vms::client::desktop::nxoptx {
 
@@ -60,6 +61,8 @@ const QStringList& knownActions()
         QStringLiteral("addStreams"),
         QStringLiteral("renameEntry"),
         QStringLiteral("removeEntry"),
+        QStringLiteral("getSettings"),
+        QStringLiteral("setPrefetchConnections"),
     };
     return actions;
 }
@@ -404,6 +407,34 @@ QJsonObject removeEntry(PlaylistManager* playlists, const QJsonObject& request)
     return {{kOk, true}, {kPlaylist, id}, {kRow, row}};
 }
 
+QJsonObject reportSettings(const LocalSettings* localSettings)
+{
+    if (!localSettings)
+        return failure(QStringLiteral("unavailable"));
+
+    return {
+        {kOk, true},
+        {QStringLiteral("prefetchConnections"), localSettings->streamPrefetchConnections()},
+    };
+}
+
+QJsonObject setPrefetchConnections(LocalSettings* localSettings, const QJsonObject& request)
+{
+    if (!localSettings)
+        return failure(QStringLiteral("unavailable"));
+
+    const QJsonValue value = request.value(QStringLiteral("connections"));
+    if (!value.isDouble())
+        return failure(QStringLiteral("noConnections"));
+
+    // The source keeps as many connections as it was created with, so the value is applied to the
+    // next playback; the idle sources are dropped by the client when the setting changes.
+    const int connections = qBound(1, value.toInt(), 32);
+    localSettings->streamPrefetchConnections = connections;
+
+    return {{kOk, true}, {QStringLiteral("connections"), connections}};
+}
+
 QJsonObject help()
 {
     QJsonArray actions;
@@ -426,7 +457,8 @@ QString socketName()
     return QStringLiteral("nxoptx");
 }
 
-QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists)
+QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
+    LocalSettings* localSettings)
 {
     if (!playlists)
         return failure(QStringLiteral("unavailable"));
@@ -446,6 +478,10 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists)
             {QStringLiteral("socket"), socketName()}};
     if (action == QLatin1String("help"))
         return help();
+    if (action == QLatin1String("getSettings"))
+        return reportSettings(localSettings);
+    if (action == QLatin1String("setPrefetchConnections"))
+        return setPrefetchConnections(localSettings, request);
     if (action == QLatin1String("listPlaylists"))
         return listPlaylists(playlists);
     if (action == QLatin1String("createPlaylist"))

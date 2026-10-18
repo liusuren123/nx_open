@@ -27,6 +27,7 @@ extern "C" {
 #include <nx/media/video_data_packet.h>
 #include <nx/utils/log/log.h>
 #include <nx/vms/client/desktop/application_context.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
 
 #include "hls_vod_source.h"
 #include "local_camera_source.h"
@@ -50,8 +51,14 @@ constexpr qint64 kEndSeekBackoffUs = 1'000'000;
  * the connections multiply, and every source downloads what it needs on its own, so they are kept
  * few: a segment a demuxer waits for is then fetched by connections that do not compete with a dozen
  * others.
+ *
+ * The value comes from the local settings, so it can be changed while the client runs; it is applied
+ * to sources created after the change.
  */
-constexpr int kPrefetchConnections = 4;
+int prefetchConnections()
+{
+    return qBound(1, appContext()->localSettings()->streamPrefetchConnections(), 32);
+}
 
 StreamScheme schemeOf(const QString& url)
 {
@@ -249,7 +256,7 @@ bool LocalCameraArchiveDelegate::openStream()
             if (StreamCache* const cache = appContext()->streamCache())
             {
                 HlsVodSource::prepareInBackground(
-                    d->url, cache->folder(), cache->limitBytes(), kPrefetchConnections);
+                    d->url, cache->folder(), cache->limitBytes(), prefetchConnections());
             }
 
             d->lastError = tr("Preparing '%1' for playback.").arg(sourceDescription());
@@ -624,7 +631,7 @@ bool LocalCameraArchiveDelegate::switchToPrefetchedPlaylist(bool cachedOnly)
     QElapsedTimer timer;
     timer.start();
     std::shared_ptr<HlsVodSource> source = HlsVodSource::acquire(
-        d->url, cache->folder(), cache->limitBytes(), kPrefetchConnections, &error);
+        d->url, cache->folder(), cache->limitBytes(), prefetchConnections(), &error);
     if (!source)
     {
         NX_DEBUG(typeid(LocalCameraArchiveDelegate), "Not prefetching '%1': %2.",

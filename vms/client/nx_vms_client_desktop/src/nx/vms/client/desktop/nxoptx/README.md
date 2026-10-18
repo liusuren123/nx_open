@@ -52,6 +52,8 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 | `addStream` | 加入网络流并指定显示名称 | `playlist`, `url`, `name`, `username`, `password` |
 | `addStreams` | 一次加入多条网络流 | `playlist`, `items` 或 `data`（见下） |
 | `removeEntry` | 删除某一行 | `playlist`, `row` |
+| `getSettings` | 读取可调设置 | — |
+| `setPrefetchConnections` | 设置 HLS 预取连接数（1–32），下次播放生效 | `connections` |
 
 字段说明：
 
@@ -66,6 +68,24 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 * `data`：与 `items` 相同的 JSON，但先做 zlib 压缩，前面加 4 字节大端未压缩长度，再 base64url
   编码。浏览器拒绝为超过约 2 KB 的外部协议 URL 发起跳转，几条流地址就会超过这个限制，所以
   “全部添加”发的是 `data`。手写请求和套接字协议用明文 `items` 即可。
+
+## 运行期可调设置
+
+`setPrefetchConnections` 修改有限 HLS 播放列表的并发下载连接数（默认 4，范围 1–32），
+同时也会写进本地设置，下次启动客户端仍然有效：
+
+```json
+{"action": "setPrefetchConnections", "connections": 8}
+```
+
+响应：`{"ok": true, "connections": 8}`。正在播放的流保持它创建时的连接数，新的播放（或
+重新打开同一个播放列表）才会用新值；空闲的下载源会被丢弃以便重建。`getSettings` 返回当前值：
+
+```json
+{"ok": true, "prefetchConnections": 4}
+```
+
+同一个值也可以在客户端「本地设置 → 高级」里的「HLS Prefetch Connections」调整。
 
 ## 响应
 

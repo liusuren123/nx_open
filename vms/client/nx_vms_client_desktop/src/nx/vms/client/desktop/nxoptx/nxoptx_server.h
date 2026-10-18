@@ -12,6 +12,7 @@ class QLocalSocket;
 namespace nx::vms::client::desktop {
 
 class PlaylistManager;
+class LocalSettings;
 
 /**
  * Serves the nxoptx protocol (see nxoptx_protocol.h) on a local socket while the client is running,
@@ -29,7 +30,8 @@ class NX_VMS_CLIENT_DESKTOP_API NxOptxServer: public QObject
     Q_OBJECT
 
 public:
-    explicit NxOptxServer(PlaylistManager* playlists, QObject* parent = nullptr);
+    explicit NxOptxServer(PlaylistManager* playlists, LocalSettings* settings,
+        QObject* parent = nullptr);
     virtual ~NxOptxServer() override;
 
     /** Whether the local socket could be opened. Another running client may hold it. */
@@ -45,6 +47,7 @@ private:
 
     QLocalServer m_server;
     PlaylistManager* const m_playlists;
+    LocalSettings* const m_settings;
 
     /** Partially received requests, one buffer per connection. */
     QHash<QLocalSocket*, QByteArray> m_buffers;

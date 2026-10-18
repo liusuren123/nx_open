@@ -150,6 +150,9 @@ QnAdvancedSettingsWidget::QnAdvancedSettingsWidget(QWidget *parent) :
     connect(ui->maxHardwareDecodingStreamsSpinBox, QnSpinboxIntValueChanged, this,
         &QnAbstractPreferencesWidget::hasChangesChanged);
 
+    connect(ui->streamPrefetchConnectionsSpinBox, QnSpinboxIntValueChanged, this,
+        &QnAbstractPreferencesWidget::hasChangesChanged);
+
     // Live buffer lengths slider/spin logic.
     connect(ui->maximumLiveBufferLengthSlider, &QSlider::valueChanged, this,
         [this](int value)
@@ -277,6 +280,7 @@ void QnAdvancedSettingsWidget::applyChanges()
     appContext()->localSettings()->glBlurEnabled = isBlurEnabled();
     appContext()->localSettings()->hardwareDecodingEnabledProperty = isHardwareDecodingEnabled();
     appContext()->localSettings()->maxHardwareDecodingStreams = maxHardwareDecodingStreams();
+    appContext()->localSettings()->streamPrefetchConnections = streamPrefetchConnections();
 
     const auto oldCertificateValidationLevel =
         appContext()->coreSettings()->certificateValidationLevel();
@@ -382,6 +386,7 @@ void QnAdvancedSettingsWidget::loadDataToUi()
     setBlurEnabled(appContext()->localSettings()->glBlurEnabled());
     setHardwareDecodingEnabled(appContext()->localSettings()->hardwareDecodingEnabled());
     setMaxHardwareDecodingStreams(appContext()->localSettings()->maxHardwareDecodingStreams());
+    setStreamPrefetchConnections(appContext()->localSettings()->streamPrefetchConnections());
     setCertificateValidationLevel(appContext()->coreSettings()->certificateValidationLevel());
     updateCertificateValidationLevelDescription();
 }
@@ -395,6 +400,7 @@ bool QnAdvancedSettingsWidget::hasChanges() const
         || appContext()->localSettings()->glBlurEnabled() != isBlurEnabled()
         || appContext()->localSettings()->hardwareDecodingEnabled() != isHardwareDecodingEnabled()
         || appContext()->localSettings()->maxHardwareDecodingStreams() != maxHardwareDecodingStreams()
+        || appContext()->localSettings()->streamPrefetchConnections() != streamPrefetchConnections()
         || appContext()->coreSettings()->certificateValidationLevel()
             != certificateValidationLevel();
 }
@@ -517,6 +523,16 @@ int QnAdvancedSettingsWidget::maxHardwareDecodingStreams() const
 void QnAdvancedSettingsWidget::setMaxHardwareDecodingStreams(int value)
 {
     ui->maxHardwareDecodingStreamsSpinBox->setValue(value);
+}
+
+int QnAdvancedSettingsWidget::streamPrefetchConnections() const
+{
+    return ui->streamPrefetchConnectionsSpinBox->value();
+}
+
+void QnAdvancedSettingsWidget::setStreamPrefetchConnections(int value)
+{
+    ui->streamPrefetchConnectionsSpinBox->setValue(value);
 }
 
 int QnAdvancedSettingsWidget::maximumLiveBufferMs() const

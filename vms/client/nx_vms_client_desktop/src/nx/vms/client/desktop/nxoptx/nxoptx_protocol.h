@@ -12,6 +12,7 @@ class QUrl;
 namespace nx::vms::client::desktop {
 
 class PlaylistManager;
+class LocalSettings;
 
 /**
  * The nxoptx protocol.
@@ -39,7 +40,8 @@ QString socketName();
  * Executes one request and returns the response object. Every request is answered, so the result is
  * never an empty object; a failure carries `{"ok": false, "error": "<code>"}`.
  */
-QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists);
+QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
+    LocalSettings* settings = nullptr);
 
 /**
  * Converts an nxoptx:// URI into a request object. Returns nullopt and describes the problem in

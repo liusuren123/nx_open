@@ -72,6 +72,12 @@ public:
     static bool isServing(const QString& playlistUrl);
 
     /**
+     * Drops the sources no playback holds any more, so that the next one is created with the
+     * current settings; the number of connections is fixed when a source is created.
+     */
+    static void forgetIdleSources();
+
+    /**
      * Whether the playlist has already been downloaded and cached, so that it can be served without
      * touching the network at all.
      */

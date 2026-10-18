@@ -50,6 +50,9 @@ private:
     int maxHardwareDecodingStreams() const;
     void setMaxHardwareDecodingStreams(int value);
 
+    int streamPrefetchConnections() const;
+    void setStreamPrefetchConnections(int value);
+
     int  maximumLiveBufferMs() const;
     void setMaximumLiveBufferMs(int value);
 

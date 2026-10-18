@@ -167,6 +167,8 @@ public:
         "Folder the streamed media files are cached in. Empty selects the default one."};
     Property<qint64> streamCacheLimitBytes{this, "streamCacheLimitBytes", 0,
         "Upper bound of the stream cache, in bytes. Zero selects the default one."};
+    Property<int> streamPrefetchConnections{this, "streamPrefetchConnections", 4,
+        "How many segments of a finite HLS playlist are downloaded at the same time."};
 
     Property<QString> crashDumpFolder{this, "crashDumpFolder", {},
         "Folder the crash dumps are written to. Empty selects the default one."};

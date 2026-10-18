@@ -1199,6 +1199,37 @@ bool HlsVodSource::isServing(const QString& playlistUrl)
     return reg.sources.contains(playlistUrl);
 }
 
+void HlsVodSource::forgetIdleSources()
+{
+    Registry& reg = registry();
+    QList<std::shared_ptr<HlsVodSource>> retired;
+    {
+        const std::lock_guard<std::mutex> lock(reg.mutex);
+        for (int i = 0; i < reg.order.size();)
+        {
+            const QString key = reg.order.at(i);
+            const auto it = reg.sources.find(key);
+            if (it == reg.sources.end())
+            {
+                reg.order.removeAt(i);
+                continue;
+            }
+
+            if (it.value().use_count() > 1)
+            {
+                ++i; //< A playback is using it; it keeps the connections it was created with.
+                continue;
+            }
+
+            retired.append(it.value());
+            reg.sources.erase(it);
+            reg.order.removeAt(i);
+        }
+    }
+
+    // Destroyed here, after the lock: stopping a source joins its threads.
+}
+
 bool HlsVodSource::hasCachedPlaylist(const QString& playlistUrl, const QString& cacheFolder)
 {
     if (playlistUrl.isEmpty() || cacheFolder.isEmpty())
