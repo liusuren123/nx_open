@@ -97,9 +97,8 @@ async function packPayload(text)
 }
 
 /**
- * A batch is one command, not one command per item: the browser may only start one external
- * protocol navigation at a time, so separate launches cancel each other and only the last stream
- * would arrive.
+ * Builds one command that adds several streams at once. Sending one command per stream would make
+ * the browser cancel the earlier launches.
  */
 async function buildBatchUri(entries)
 {
@@ -109,6 +108,42 @@ async function buildBatchUri(entries)
     const encode = encodeURIComponent;
     return `${SCHEME}://addStreams?data=${encode(packed)}`
         + (playlist ? `&playlist=${encode(playlist)}` : '');
+}
+
+/**
+ * Chrome ignores an external protocol URL that is too long, and a dozen stream addresses are
+ * enough to get there even after compression. A batch that does not fit is therefore sent as
+ * several commands, spaced out so that the browser handles them one after another.
+ */
+const MAX_COMMAND_LENGTH = 1500;
+const CHUNK_DELAY_MS = 1500;
+
+function delay(ms)
+{
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Greedy split: every command but the last one gets as many entries as it can hold. */
+async function splitIntoCommands(entries)
+{
+    const commands = [];
+    let command = [];
+    for (const entry of entries)
+    {
+        const candidate = [...command, entry];
+        if (command.length && (await buildBatchUri(candidate)).length > MAX_COMMAND_LENGTH)
+        {
+            commands.push(command);
+            command = [entry];
+        }
+        else
+        {
+            command = candidate;
+        }
+    }
+    if (command.length)
+        commands.push(command);
+    return commands;
 }
 
 /**
@@ -291,19 +326,33 @@ elements.addAll.addEventListener('click', async () =>
 
     try
     {
-        const uri = await buildBatchUri(entries);
-        await openUri(uri);
-        // The length is shown on purpose: a command over ~2 KB is silently ignored by Chrome.
-        setStatus(rows[0], `已发送 ${entries.length} 条（命令 ${uri.length} 字符）`,
-            uri.length > 1900);
+        const commands = await splitIntoCommands(entries);
+        let sent = 0;
+        for (const [index, command] of commands.entries())
+        {
+            if (index > 0)
+                await delay(CHUNK_DELAY_MS);
+
+            const uri = await buildBatchUri(command);
+            await openUri(uri);
+            sent += command.length;
+
+            // The length is shown on purpose: a longer command is silently ignored by the browser.
+            const row = elements.list.firstElementChild || rows[0];
+            setStatus(row, commands.length > 1
+                ? `已发送 ${sent}/${entries.length} 条，第 ${index + 1}/${commands.length} 批`
+                : `已发送 ${sent} 条（命令 ${uri.length} 字符）`,
+                uri.length > MAX_COMMAND_LENGTH);
+        }
     }
     catch (error)
     {
-        setStatus(rows[0], `批量添加失败：${error?.message || error}`, true);
+        setStatus(elements.list.firstElementChild || rows[0],
+            `批量添加失败：${error?.message || error}`, true);
         return;
     }
 
-    for (const row of rows.slice(1))
+    for (const row of [...elements.list.children].slice(1))
         setStatus(row, '已发送到播放器', false);
 });
 
