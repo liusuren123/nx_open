@@ -2,6 +2,9 @@
 
 #include "resource_tree_item_factory.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
+
 #include <client/client_globals.h>
 #include <core/resource/camera_resource.h>
 #include <core/resource/layout_resource.h>
@@ -580,6 +583,28 @@ AbstractItemPtr ResourceTreeItemFactory::createLocalFilesItem() const
         .withRole(Qn::ResourceIconKeyRole, static_cast<int>(IconCache::LocalResources))
         .withRole(Qn::NodeTypeRole, QVariant::fromValue(NodeType::localResources))
         .withRole(Qn::HelpTopicIdRole, static_cast<int>(HelpTopic::Id::MediaFolders));
+}
+
+AbstractItemPtr ResourceTreeItemFactory::createLocalFolderItem(const QString& folderId) const
+{
+    const auto subIds = folderId.split(resource_grouping::kSubIdDelimiter);
+    auto displayText = subIds.last();
+    if (subIds.size() == 1)
+    {
+        // The root folder: display its name instead of the full path.
+        const auto folderName = QFileInfo(displayText).fileName();
+        if (!folderName.isEmpty())
+            displayText = folderName;
+    }
+
+    const auto nativePath = QDir::toNativeSeparators(subIds.join(QLatin1Char('/')));
+
+    return GenericItemBuilder()
+        .withRole(Qt::DisplayRole, displayText)
+        .withRole(Qt::ToolTipRole, nativePath)
+        .withRole(Qn::LocalFolderIdRole, folderId)
+        .withRole(Qn::ResourceIconKeyRole, static_cast<int>(IconCache::LocalResources))
+        .withRole(Qn::NodeTypeRole, QVariant::fromValue(NodeType::localFolder));
 }
 
 AbstractItemPtr ResourceTreeItemFactory::createAllCamerasAndResourcesItem() const

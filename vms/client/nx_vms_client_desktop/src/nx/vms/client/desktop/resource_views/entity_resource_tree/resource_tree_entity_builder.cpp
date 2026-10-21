@@ -2,6 +2,8 @@
 
 #include "resource_tree_entity_builder.h"
 
+#include <QtCore/QDir>
+
 #include <client/client_globals.h>
 #include <core/resource/camera_resource.h>
 #include <core/resource/layout_resource.h>
@@ -16,6 +18,7 @@
 #include <nx/vms/client/core/resource/session_resources_signal_listener.h>
 #include <nx/vms/client/core/system_finder/system_description.h>
 #include <nx/vms/client/core/system_finder/system_finder.h>
+#include <nx/vms/client/desktop/application_context.h>
 #include <nx/vms/client/desktop/ini.h>
 #include <nx/vms/client/desktop/other_servers/other_servers_manager.h>
 #include <nx/vms/client/desktop/resource_views/entity_item_model/entity/base_notification_observer.h>
@@ -42,6 +45,7 @@
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_source/resource_tree_item_key_source_pool.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/resource_tree_item_factory.h>
 #include <nx/vms/client/desktop/resource_views/entity_resource_tree/user_layout_resource_index.h>
+#include <nx/vms/client/desktop/settings/local_settings.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/common/system_settings.h>
 
@@ -62,6 +66,8 @@ using UserdDefinedGroupItemCreator = std::function<AbstractItemPtr(const QString
 
 using RecorderCameraGroupIdGetter = std::function<QString(const QnResourcePtr&, int)>;
 using RecorderGroupItemCreator = std::function<AbstractItemPtr(const QString&)>;
+
+using LocalFolderGroupIdGetter = std::function<QString(const QnResourcePtr&, int)>;
 
 MainTreeResourceItemDecorator::Permissions permissionsSummary(
     const QnUserResourcePtr& user,
@@ -251,6 +257,89 @@ UserdDefinedGroupItemCreator userDefinedGroupItemCreator(
                 result |= {Qt::ItemIsEditable, Qt::ItemIsDropEnabled};
 
             return factory->createResourceGroupItem(compositeGroupId, result);
+        };
+}
+
+//-------------------------------------------------------------------------------------------------
+// Function wrapper providers related to the local media directories grouping.
+//-------------------------------------------------------------------------------------------------
+
+QStringList localMediaFolders()
+{
+    const auto settings = nx::vms::client::desktop::appContext()->localSettings();
+    return NX_ASSERT(settings) ? settings->mediaFolders() : QStringList();
+}
+
+QString stripTrailingSlash(QString path)
+{
+    while (path.size() > 1 && path.endsWith(QLatin1Char('/')))
+        path.chop(1);
+
+    return path;
+}
+
+/**
+ * @returns Composite ID of the chain of folders containing the given local media file, i.e. the
+ *     absolute path of the media directory root followed by the names of nested folders, or null
+ *     string if the file does not belong to any of the configured media directories.
+ */
+QString localMediaFolderCompositeId(const QnResourcePtr& resource)
+{
+    const auto path = QDir::fromNativeSeparators(resource->getUrl());
+    if (path.isEmpty())
+        return {};
+
+    for (const auto& folder: localMediaFolders())
+    {
+        const auto root = stripTrailingSlash(
+            QDir::fromNativeSeparators(QDir(folder).canonicalPath()));
+
+        if (root.isEmpty() || path.size() <= root.size() + 1
+            || !path.startsWith(root, Qt::CaseInsensitive)
+            || path.at(root.size()) != QLatin1Char('/'))
+        {
+            continue;
+        }
+
+        QStringList subIds{root};
+
+        // The last component is the file name itself, the rest is a chain of nested folders.
+        const auto relativeParts =
+            path.mid(root.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        for (int i = 0; i + 1 < relativeParts.size(); ++i)
+            subIds.append(relativeParts[i]);
+
+        // Too deep hierarchies are flattened into the deepest allowed group.
+        while (subIds.size() > resource_grouping::kUserDefinedGroupingDepth)
+            subIds.removeLast();
+
+        return subIds.join(resource_grouping::kSubIdDelimiter);
+    }
+
+    return {};
+}
+
+LocalFolderGroupIdGetter localFolderGroupIdGetter()
+{
+    return
+        [](const QnResourcePtr& resource, int order)
+        {
+            const auto compositeId = localMediaFolderCompositeId(resource);
+
+            if (resource_grouping::compositeIdDimension(compositeId) <= order)
+                return QString();
+
+            return resource_grouping::trimCompositeId(compositeId, order + 1);
+        };
+}
+
+std::function<AbstractItemPtr(const QString&)> localFolderItemCreator(
+    ResourceTreeItemFactory* factory)
+{
+    return
+        [factory](const QString& folderId) -> AbstractItemPtr
+        {
+            return factory->createLocalFolderItem(folderId);
         };
 }
 
@@ -877,9 +966,20 @@ AbstractEntityPtr ResourceTreeEntityBuilder::createLocalFilesGroupEntity() const
 
     fileLayoutsGroupList->installItemSource(m_itemKeySourcePool->fileLayoutsSource());
 
-    auto mediaFilesList = makeKeyList<QnResourcePtr>(
+    // Local media files are grouped by the folders of the configured media directories; files
+    // which don't belong to any of them are placed after the folders, i.e. stay at the top level.
+    const GroupingRule<QString, QnResourcePtr> localFoldersGroupingRule =
+        {localFolderGroupIdGetter(),
+        localFolderItemCreator(m_itemFactory.get()),
+        Qn::LocalFolderIdRole,
+        resource_grouping::kUserDefinedGroupingDepth,
+        numericOrder()};
+
+    auto mediaFilesList = std::make_unique<GroupingEntity<QString, QnResourcePtr>>(
         resourceItemCreator(m_itemFactory.get(), user()),
-        locaResourcesOrder());
+        core::ResourceRole,
+        locaResourcesOrder(),
+        GroupingEntity<QString, QnResourcePtr>::GroupingRuleStack{localFoldersGroupingRule});
 
     mediaFilesList->installItemSource(m_itemKeySourcePool->localMediaSource());
 

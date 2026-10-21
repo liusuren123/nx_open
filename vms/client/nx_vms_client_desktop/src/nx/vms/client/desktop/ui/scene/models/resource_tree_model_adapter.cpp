@@ -715,6 +715,10 @@ ResourceTree::ExpandedNodeId ResourceTreeModelAdapter::expandedNodeId(
             return ResourceTree::ExpandedNodeId{nodeType, groupId, parentId};
         }
 
+        case ResourceTree::NodeType::localFolder:
+            return ResourceTree::ExpandedNodeId{
+                nodeType, index.data(Qn::LocalFolderIdRole).toString()};
+
         default:
             return isTopLevelNodeType(nodeType)
                 ? ResourceTree::ExpandedNodeId{nodeType}

@@ -56,6 +56,7 @@ NX_REFLECTION_ENUM_CLASS(NodeType,
     sharedLayout, //< Shared layout link, displayed under user.
     recorder, //< Recorder (VMAX, etc). Has both guid and resource (parent server).
     customResourceGroup, //< User defined group of camera resources for representation.
+    localFolder, //< Folder of a local media directory, displayed under local resources.
     sharedResource, //< Accessible resource link, displayed under user.
     resource, //< Generic resource, most of physical device. Has only resource.
     layoutItem, //< Layout item. Has both guid and resource.

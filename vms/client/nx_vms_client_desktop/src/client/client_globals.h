@@ -411,6 +411,9 @@ namespace Qn
 
         ResourceLogInfoRole, /**< Role for extended string description of resource from resource tree. (QString) */
 
+        /** Chain of local media folder names, used for grouping local media files (QString). */
+        LocalFolderIdRole,
+
         ItemDataRoleCount,
     };
 

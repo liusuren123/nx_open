@@ -44,6 +44,14 @@ public:
     AbstractItemPtr createUsersItem() const;
     AbstractItemPtr createOtherSystemsItem() const;
     AbstractItemPtr createLocalFilesItem() const;
+
+    /**
+     * Local media folder item, i.e. a folder of one of the local media directories.
+     * @param folderId Composite ID, i.e. a chain of folder names separated by
+     *     resource_grouping::kSubIdDelimiter, the first one being the absolute path of the
+     *     media directory root.
+     */
+    AbstractItemPtr createLocalFolderItem(const QString& folderId) const;
     AbstractItemPtr createHealthMonitorsItem() const;
     AbstractItemPtr createVideoWallsItem(QString customName = QString()) const;
 
