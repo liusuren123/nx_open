@@ -53,6 +53,8 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 | `addStreams` | 一次加入多条网络流 | `playlist`, `items` 或 `data`（见下） |
 | `removeEntry` | 删除某一行 | `playlist`, `row` |
 | `replaceStream` | 把播放列表里某个流地址换成新地址（签名过期时用） | `url`, `newUrl` |
+| `cacheStream` | 把整条流下载到本地缓存（等同右键「Cache locally」） | `url` |
+| `stopCaching` | 停止正在进行的整片缓存 | `url` |
 | `getSettings` | 读取可调设置 | — |
 | `setPrefetchConnections` | 设置 HLS 预取连接数（1–32），下次播放生效 | `connections` |
 
@@ -99,6 +101,20 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 ```
 
 响应：`{"ok": true, "updated": 2}`，`updated` 是被替换的条目数（0 表示列表里没有这个旧地址）。
+
+## 整片缓存
+
+`cacheStream` 在后台把整条流下载进流缓存（`本地设置 → 高级 → 流缓存`），完成后即使原地址失效、
+或者断网，也能直接播放。手动触发入口是播放列表条目的**右键菜单 → Cache locally**；播放期间
+再次打开该条目就直接从磁盘读取。
+
+```json
+{"action": "cacheStream", "url": "<流地址>"}
+{"action": "stopCaching", "url": "<流地址>"}
+```
+
+响应：`{"ok": true, "url": "..."}`；无法缓存（活流、大小未知、缓存已满）返回
+`{"ok": false, "error": "cannotCache"}`。已下载的块会保留，取消不会丢掉已有进度。
 
 ## 响应
 

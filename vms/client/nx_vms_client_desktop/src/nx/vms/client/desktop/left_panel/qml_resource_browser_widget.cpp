@@ -21,6 +21,7 @@
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/action_target_provider.h>
 #include <nx/vms/client/desktop/playlists/playlist_player.h>
+#include <nx/vms/client/desktop/resource/local_camera/stream_cache.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/client/desktop/window_context.h>
 #include <ui/graphics/opengl/gl_functions.h>
@@ -56,6 +57,7 @@ QmlResourceBrowserWidget::QmlResourceBrowserWidget(WindowContext* context, QWidg
 
     rootContext()->setContextProperty(WindowContext::kQmlPropertyName, context);
     rootContext()->setContextProperty("playlistPlayer", d->playlistPlayer.get());
+    rootContext()->setContextProperty("streamCache", appContext()->streamCache());
 
     setClearColor(Qt::transparent);
     setResizeMode(QQuickWidget::ResizeMode::SizeRootObjectToView);

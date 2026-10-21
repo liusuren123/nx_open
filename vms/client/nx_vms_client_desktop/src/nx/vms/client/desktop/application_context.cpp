@@ -816,13 +816,14 @@ ApplicationContext::ApplicationContext(
             d->forgottenSystemsManager = std::make_unique<QnForgottenSystemsManager>();
             d->resourcesChangesManager = std::make_unique<ResourcesChangesManager>();
             d->playlistManager = std::make_unique<PlaylistManager>(d->localSettings.get());
-            // Serves the nxoptx protocol, through which external programs can inspect and fill the
-            // playlists, and registers the matching URI handler.
-            d->nxOptxServer = std::make_unique<NxOptxServer>(
-                d->playlistManager.get(), d->localSettings.get());
             d->localCameraManager = std::make_unique<LocalCameraManager>(d->localSettings.get());
             d->iptvManager = std::make_unique<IptvManager>(d->localSettings.get());
             d->streamCache = std::make_unique<StreamCache>(d->localSettings.get());
+
+            // Serves the nxoptx protocol, through which external programs can inspect and fill the
+            // playlists and manage the stream cache, and registers the matching URI handler.
+            d->nxOptxServer = std::make_unique<NxOptxServer>(
+                d->playlistManager.get(), d->localSettings.get(), d->streamCache.get());
 
             // The connection count of an HLS source is fixed when it is created, so the idle sources
             // are dropped when the setting changes and the next playback picks up the new value.

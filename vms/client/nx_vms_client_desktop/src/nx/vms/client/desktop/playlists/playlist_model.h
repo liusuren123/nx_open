@@ -27,6 +27,7 @@ public:
         IsFolderRole,
         IsStreamRole,
         DurationMsRole,
+        EntryUrlRole,
     };
     Q_ENUM(Role)
 

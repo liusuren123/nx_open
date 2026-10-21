@@ -37,6 +37,19 @@ Item
         filter: searchField.text
     }
 
+    // Downloads started from the context menu report progress; the rows poll it while it lasts.
+    Timer
+    {
+        id: cacheTick
+
+        property int value: 0
+
+        interval: 500
+        repeat: true
+        running: true
+        onTriggered: value++
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Playback
 
@@ -341,11 +354,23 @@ Item
             {
                 id: entryDuration
 
+                readonly property real cacheProgress: {
+                    cacheTick.value //< Re-read while a download is in progress.
+                    return (isStream && entryUrl.length > 0
+                        && typeof streamCache !== "undefined" && streamCache)
+                        ? streamCache.cachingProgress(entryUrl)
+                        : -1
+                }
+
                 anchors.right: parent.right
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                text: playlistBrowser.formatDuration(durationMs)
-                color: ColorTheme.colors.light12
+                text: cacheProgress >= 0
+                    ? Math.round(cacheProgress * 100) + "%"
+                    : playlistBrowser.formatDuration(durationMs)
+                color: cacheProgress >= 0
+                    ? ColorTheme.colors.brand_core
+                    : ColorTheme.colors.light12
                 font.pixelSize: 11
             }
 
@@ -617,6 +642,33 @@ Item
             text: qsTr("Play")
             enabled: entryContextMenu.targetRow >= 0
             onTriggered: playlistBrowser.playEntry(entryContextMenu.targetRow)
+        }
+
+        NxControls.CompactMenuItem
+        {
+            readonly property string targetUrl: entryContextMenu.targetRow >= 0
+                ? playlistBrowser.entryUrlAt(entryContextMenu.targetRow)
+                : ""
+            readonly property real progress: (targetUrl.length > 0
+                && typeof streamCache !== "undefined" && streamCache)
+                ? streamCache.cachingProgress(targetUrl)
+                : -1
+            readonly property bool cached: (targetUrl.length > 0
+                && typeof streamCache !== "undefined" && streamCache)
+                ? streamCache.isFullyCached(targetUrl)
+                : false
+
+            text: progress >= 0
+                ? qsTr("Stop caching")
+                : (cached ? qsTr("Cached") : qsTr("Cache locally"))
+            enabled: targetUrl.length > 0 && !cached
+            onTriggered:
+            {
+                if (progress >= 0)
+                    streamCache.stopCaching(targetUrl)
+                else
+                    streamCache.cacheStream(targetUrl)
+            }
         }
 
         NxControls.CompactMenuSeparator {}

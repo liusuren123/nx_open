@@ -91,12 +91,40 @@ public:
     /** Deletes all the cached data. */
     void clear();
 
+    /** Whether the whole resource is already in the cache. */
+    Q_INVOKABLE bool isFullyCached(const QString& url) const;
+
+    /** Share of the resource that is already cached, in [0, 1]; 0 when nothing is known. */
+    Q_INVOKABLE qreal cachedShare(const QString& url) const;
+
+    /**
+     * Share of the download started by cacheStream(), in [0, 1], or -1 when nothing is being
+     * downloaded for the resource.
+     */
+    Q_INVOKABLE qreal cachingProgress(const QString& url);
+
+    /**
+     * Downloads the whole resource into the cache in the background, unless it is there already, so
+     * that the next playback does not need the network at all. Returns false when the resource
+     * cannot be cached: a live stream has no end, and a full cache takes no more data.
+     */
+    Q_INVOKABLE bool cacheStream(const QString& url);
+
+    /** Stops a download started by cacheStream(); the blocks already downloaded are kept. */
+    Q_INVOKABLE void stopCaching(const QString& url);
+
 signals:
     void changed();
+
+    /** Progress of a download started by cacheStream(), and its completion. */
+    void cachingChanged(const QString& url);
 
 private:
     struct Private;
     std::unique_ptr<Private> d;
+
+    /** Joins and forgets the downloads that have finished. */
+    void reapFinishedCaching();
 };
 
 } // namespace nx::vms::client::desktop

@@ -13,6 +13,7 @@ namespace nx::vms::client::desktop {
 
 class PlaylistManager;
 class LocalSettings;
+class StreamCache;
 
 /**
  * The nxoptx protocol.
@@ -41,7 +42,7 @@ QString socketName();
  * never an empty object; a failure carries `{"ok": false, "error": "<code>"}`.
  */
 QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
-    LocalSettings* settings = nullptr);
+    LocalSettings* settings = nullptr, StreamCache* streamCache = nullptr);
 
 /**
  * Converts an nxoptx:// URI into a request object. Returns nullopt and describes the problem in

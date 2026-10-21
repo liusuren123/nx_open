@@ -19,10 +19,12 @@ const nx::log::Tag kLogTag(QStringLiteral("nxoptx"));
 
 } // namespace
 
-NxOptxServer::NxOptxServer(PlaylistManager* playlists, LocalSettings* settings, QObject* parent):
+NxOptxServer::NxOptxServer(PlaylistManager* playlists, LocalSettings* settings,
+    StreamCache* streamCache, QObject* parent):
     QObject(parent),
     m_playlists(playlists),
-    m_settings(settings)
+    m_settings(settings),
+    m_streamCache(streamCache)
 {
     // Only the user who runs the client may talk to it. On Windows the named pipe is created with
     // the default security descriptor of this process anyway; the option matters elsewhere.
@@ -107,7 +109,7 @@ void NxOptxServer::onReadyRead()
         }
         else
         {
-            response = nxoptx::execute(document.object(), m_playlists, m_settings);
+            response = nxoptx::execute(document.object(), m_playlists, m_settings, m_streamCache);
         }
 
         socket->write(QJsonDocument(response).toJson(QJsonDocument::Compact) + '\n');

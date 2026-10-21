@@ -20,6 +20,7 @@
 #include <nx/utils/log/log.h>
 #include <nx/vms/client/desktop/playlists/playlist.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/resource/local_camera/stream_cache.h>
 #include <nx/vms/client/desktop/settings/local_settings.h>
 
 namespace nx::vms::client::desktop::nxoptx {
@@ -65,6 +66,8 @@ const QStringList& knownActions()
         QStringLiteral("replaceStream"),
         QStringLiteral("getSettings"),
         QStringLiteral("setPrefetchConnections"),
+        QStringLiteral("cacheStream"),
+        QStringLiteral("stopCaching"),
     };
     return actions;
 }
@@ -424,6 +427,35 @@ QJsonObject replaceStream(PlaylistManager* playlists, const QJsonObject& request
     return {{kOk, true}, {QStringLiteral("updated"), updated}};
 }
 
+/** Downloads the whole resource into the cache, so that playback does not need the network. */
+QJsonObject cacheStream(StreamCache* cache, const QJsonObject& request)
+{
+    if (!cache)
+        return failure(QStringLiteral("unavailable"));
+
+    const QString url = stringValue(request, kUrl).trimmed();
+    if (url.isEmpty())
+        return failure(QStringLiteral("noUrl"));
+
+    if (!cache->cacheStream(url))
+        return failure(QStringLiteral("cannotCache"));
+
+    return {{kOk, true}, {kUrl, url}};
+}
+
+QJsonObject stopCaching(StreamCache* cache, const QJsonObject& request)
+{
+    if (!cache)
+        return failure(QStringLiteral("unavailable"));
+
+    const QString url = stringValue(request, kUrl).trimmed();
+    if (url.isEmpty())
+        return failure(QStringLiteral("noUrl"));
+
+    cache->stopCaching(url);
+    return {{kOk, true}, {kUrl, url}};
+}
+
 QJsonObject reportSettings(const LocalSettings* localSettings)
 {
     if (!localSettings)
@@ -475,7 +507,7 @@ QString socketName()
 }
 
 QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
-    LocalSettings* localSettings)
+    LocalSettings* localSettings, StreamCache* streamCache)
 {
     if (!playlists)
         return failure(QStringLiteral("unavailable"));
@@ -499,6 +531,10 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
         return reportSettings(localSettings);
     if (action == QLatin1String("setPrefetchConnections"))
         return setPrefetchConnections(localSettings, request);
+    if (action == QLatin1String("cacheStream"))
+        return cacheStream(streamCache, request);
+    if (action == QLatin1String("stopCaching"))
+        return stopCaching(streamCache, request);
     if (action == QLatin1String("listPlaylists"))
         return listPlaylists(playlists);
     if (action == QLatin1String("createPlaylist"))

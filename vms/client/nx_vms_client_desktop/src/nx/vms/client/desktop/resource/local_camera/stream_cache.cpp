@@ -90,6 +90,28 @@ int interruptCallback(void* opaque)
     return static_cast<std::atomic<bool>*>(opaque)->load() ? 1 : 0;
 }
 
+/** Options a resource is downloaded with; the same ones playback uses. */
+void setSourceOptions(AVDictionary** options, const QString& url)
+{
+    av_dict_set(options, "rw_timeout", "15000000", 0);
+    av_dict_set(options, "reconnect", "1", 0);
+    av_dict_set(options, "reconnect_streamed", "1", 0);
+    av_dict_set(options, "reconnect_delay_max", "4", 0);
+
+    const HttpSourceHeaders headers = httpSourceHeaders(url);
+    av_dict_set(options, "user_agent", headers.userAgent.toUtf8().constData(), 0);
+    if (!headers.referer.isEmpty())
+        av_dict_set(options, "referer", headers.referer.toUtf8().constData(), 0);
+}
+
+/** Path of a cache file of the resource; the URL may carry credentials, so it is hashed. */
+QString cacheFilePath(const QString& folder, const QString& url, const char* suffix)
+{
+    const QString name = QString::fromLatin1(
+        QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex());
+    return QDir(folder).absoluteFilePath(name + QLatin1String(suffix));
+}
+
 } // namespace
 
 /**
@@ -491,15 +513,7 @@ bool StreamCacheReader::Private::openSource()
         return true;
 
     AVDictionary* options = nullptr;
-    av_dict_set(&options, "rw_timeout", "15000000", 0);
-    av_dict_set(&options, "reconnect", "1", 0);
-    av_dict_set(&options, "reconnect_streamed", "1", 0);
-    av_dict_set(&options, "reconnect_delay_max", "4", 0);
-
-    const HttpSourceHeaders headers = httpSourceHeaders(url);
-    av_dict_set(&options, "user_agent", headers.userAgent.toUtf8().constData(), 0);
-    if (!headers.referer.isEmpty())
-        av_dict_set(&options, "referer", headers.referer.toUtf8().constData(), 0);
+    setSourceOptions(&options, url);
 
     const int result = avio_open2(
         &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
@@ -666,22 +680,256 @@ int64_t StreamCacheReader::seekCallback(void* opaque, int64_t offset, int whence
 
 struct StreamCache::Private
 {
-    explicit Private(LocalSettings* settings): settings(settings) {}
+    Private(StreamCache* q, LocalSettings* settings): q(q), settings(settings) {}
 
+    /** A background download of a whole resource, started from the playlist context menu. */
+    struct CachingJob
+    {
+        CachingJob(StreamCache* cache, const QString& url): cache(cache), url(url) {}
+
+        StreamCache* const cache = nullptr;
+        const QString url;
+
+        std::atomic<bool> stop{false};
+        std::atomic<bool> finished{false};
+        std::atomic<bool> failed{false};
+        std::atomic<int> doneBlocks{0};
+        std::atomic<int> totalBlocks{0};
+
+        std::thread thread;
+    };
+
+    /** Storage of the resource that is created on demand and shared by its readers. */
+    std::shared_ptr<StreamCacheStorage> storageFor(const QString& url, qint64 sizeBytes);
+
+    /** Body of the background thread; must not be called before the job is in the map. */
+    void runCaching(const std::shared_ptr<CachingJob>& job);
+
+    StreamCache* const q = nullptr;
     LocalSettings* const settings = nullptr;
 
     /** One storage per cache file, shared by the readers of the same resource. */
     std::mutex mutex;
     QHash<QString, std::weak_ptr<StreamCacheStorage>> storages;
+
+    /** Downloads in progress, one per resource. */
+    QHash<QString, std::shared_ptr<CachingJob>> jobs;
 };
+
+std::shared_ptr<StreamCacheStorage> StreamCache::Private::storageFor(
+    const QString& url, qint64 sizeBytes)
+{
+    if (url.isEmpty() || sizeBytes <= 0)
+        return nullptr;
+
+    const QString folder = q->folder();
+    const QString dataPath = cacheFilePath(folder, url, ".stream");
+
+    std::shared_ptr<StreamCacheStorage> storage;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        storage = storages.value(dataPath).lock();
+        if (!storage)
+        {
+            storage = std::make_shared<StreamCacheStorage>(
+                dataPath, cacheFilePath(folder, url, ".index"), sizeBytes);
+            if (!storage->isValid())
+                return nullptr;
+
+            storages.insert(dataPath, storage);
+        }
+    }
+
+    if (storage->size() != sizeBytes)
+    {
+        NX_WARNING(typeid(StreamCache), "Cached size of '%1' changed from %2 to %3 bytes.",
+            localCameraSourceUrlForDisplay(url), storage->size(), sizeBytes);
+        return nullptr;
+    }
+
+    return storage;
+}
+
+void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
+{
+    StreamCache* const cache = job->cache;
+    const QString url = job->url;
+    const QString displayUrl = localCameraSourceUrlForDisplay(url);
+
+    AVIOInterruptCB interrupt{&interruptCallback, const_cast<std::atomic<bool>*>(&job->stop)};
+
+    // The size of the resource has to be known before the cache can be laid out on disk.
+    qint64 size = 0;
+    {
+        AVIOContext* probe = nullptr;
+        AVDictionary* options = nullptr;
+        setSourceOptions(&options, url);
+        const int result = avio_open2(
+            &probe, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
+        av_dict_free(&options);
+
+        if (result < 0)
+        {
+            NX_WARNING(typeid(StreamCache), "Cannot cache '%1': it cannot be opened (%2).",
+                displayUrl, result);
+            job->failed = true;
+            job->finished = true;
+            emit cache->cachingChanged(url);
+            return;
+        }
+
+        size = avio_size(probe);
+        avio_close(probe);
+    }
+
+    if (size <= 0)
+    {
+        // A live stream, or a playlist whose media is fetched separately: there is nothing finite
+        // to download once and keep.
+        NX_WARNING(typeid(StreamCache), "Cannot cache '%1': its size is unknown.", displayUrl);
+        job->failed = true;
+        job->finished = true;
+        emit cache->cachingChanged(url);
+        return;
+    }
+
+    std::shared_ptr<StreamCacheStorage> storage = storageFor(url, size);
+    if (!storage)
+    {
+        job->failed = true;
+        job->finished = true;
+        emit cache->cachingChanged(url);
+        return;
+    }
+
+    const int blocks = storage->blockCount();
+    job->totalBlocks = blocks;
+
+    AVIOContext* source = nullptr;
+    const auto openSource = [&source, &url, &interrupt]() -> bool
+    {
+        if (source)
+            return true;
+
+        AVDictionary* options = nullptr;
+        setSourceOptions(&options, url);
+        const int result = avio_open2(
+            &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
+        av_dict_free(&options);
+
+        if (result < 0)
+            source = nullptr;
+
+        return source != nullptr;
+    };
+
+    int done = 0;
+    bool failed = false;
+    for (int index = 0; index < blocks && !job->stop; ++index)
+    {
+        if (storage->hasBlock(index))
+        {
+            job->doneBlocks = ++done;
+            continue;
+        }
+
+        const qint64 offset = qint64(index) * kBlockSize;
+        const int expected = storage->blockSize(index);
+
+        QByteArray data;
+
+        // One reconnect on failure, like playback does: a server that drops an idle connection must
+        // not end the download.
+        for (int attempt = 0; attempt < 2 && !job->stop; ++attempt)
+        {
+            if (!openSource())
+                break;
+
+            if (avio_seek(source, offset, SEEK_SET) < 0)
+            {
+                avio_close(source);
+                source = nullptr;
+                continue;
+            }
+
+            data.resize(expected);
+            int total = 0;
+            while (total < expected && !job->stop)
+            {
+                const int read = avio_read(source,
+                    reinterpret_cast<unsigned char*>(data.data()) + total, expected - total);
+                if (read <= 0)
+                    break;
+
+                total += read;
+            }
+
+            if (total == expected)
+                break;
+
+            data.clear();
+            avio_close(source);
+            source = nullptr;
+        }
+
+        if (job->stop)
+            break;
+
+        if (data.size() != expected)
+        {
+            NX_WARNING(typeid(StreamCache), "Cannot cache '%1': block %2 was not downloaded.",
+                displayUrl, index);
+            failed = true;
+            break;
+        }
+
+        storage->writeBlock(index, data);
+        job->doneBlocks = ++done;
+
+        // The interface shows the progress, and redrawing it for every block is pointless.
+        if ((index % 16) == 0)
+            emit cache->cachingChanged(url);
+    }
+
+    if (source)
+        avio_close(source);
+
+    if (!failed && !job->stop)
+    {
+        NX_INFO(typeid(StreamCache), "Cached '%1' completely (%2 bytes).",
+            displayUrl, size);
+    }
+
+    job->failed = failed;
+    job->finished = true;
+    emit cache->cachingChanged(url);
+}
 
 StreamCache::StreamCache(LocalSettings* settings, QObject* parent):
     QObject(parent),
-    d(new Private(settings))
+    d(new Private(this, settings))
 {
 }
 
-StreamCache::~StreamCache() = default;
+StreamCache::~StreamCache()
+{
+    std::vector<std::shared_ptr<Private::CachingJob>> jobs;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        for (const auto& job: d->jobs)
+        {
+            job->stop = true;
+            jobs.push_back(job);
+        }
+        d->jobs.clear();
+    }
+
+    for (const auto& job: jobs)
+    {
+        if (job->thread.joinable())
+            job->thread.join();
+    }
+}
 
 QString StreamCache::defaultFolder()
 {
@@ -734,41 +982,131 @@ std::shared_ptr<StreamCacheReader> StreamCache::open(const QString& url, qint64 
     }
 
     // The URL itself may carry credentials, so only its digest is used on disk.
-    const QString name = QString::fromLatin1(
-        QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex());
-    const QDir base(folder());
-    const QString dataPath = base.absoluteFilePath(name + ".stream");
-
-    std::shared_ptr<StreamCacheStorage> storage;
-    {
-        const std::lock_guard<std::mutex> lock(d->mutex);
-        storage = d->storages.value(dataPath).lock();
-        if (!storage)
-        {
-            storage = std::make_shared<StreamCacheStorage>(
-                dataPath, base.absoluteFilePath(name + ".index"), sizeBytes);
-            if (!storage->isValid())
-                return nullptr;
-
-            d->storages.insert(dataPath, storage);
-        }
-    }
-
-    if (storage->size() != sizeBytes)
-    {
-        NX_WARNING(typeid(StreamCache), "Cached size of '%1' changed from %2 to %3 bytes.",
-            localCameraSourceUrlForDisplay(url), storage->size(), sizeBytes);
+    std::shared_ptr<StreamCacheStorage> storage = d->storageFor(url, sizeBytes);
+    if (!storage)
         return nullptr;
-    }
 
     auto reader = std::shared_ptr<StreamCacheReader>(new StreamCacheReader(url, storage));
     if (!reader->avioContext())
         return nullptr;
 
-    NX_DEBUG(typeid(StreamCache), "Caching '%1' in '%2'.",
-        localCameraSourceUrlForDisplay(url), dataPath);
+    NX_DEBUG(typeid(StreamCache), "Caching '%1'.", localCameraSourceUrlForDisplay(url));
 
     return reader;
+}
+
+qreal StreamCache::cachedShare(const QString& url) const
+{
+    if (url.isEmpty())
+        return 0;
+
+    const QString dataPath = cacheFilePath(folder(), url, ".stream");
+    std::shared_ptr<StreamCacheStorage> storage;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        storage = d->storages.value(dataPath).lock();
+    }
+
+    if (!storage || storage->blockCount() <= 0)
+        return 0;
+
+    int cached = 0;
+    for (int index = 0; index < storage->blockCount(); ++index)
+    {
+        if (storage->hasBlock(index))
+            ++cached;
+    }
+
+    return qreal(cached) / storage->blockCount();
+}
+
+bool StreamCache::isFullyCached(const QString& url) const
+{
+    return cachedShare(url) >= 1.0;
+}
+
+qreal StreamCache::cachingProgress(const QString& url)
+{
+    reapFinishedCaching();
+
+    std::shared_ptr<Private::CachingJob> job;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        job = d->jobs.value(url);
+    }
+
+    if (!job)
+        return -1;
+
+    const int total = job->totalBlocks.load();
+    if (total <= 0)
+        return 0;
+
+    return qMin(qreal(1), qreal(job->doneBlocks.load()) / total);
+}
+
+bool StreamCache::cacheStream(const QString& url)
+{
+    if (url.isEmpty() || !writable())
+        return false;
+
+    reapFinishedCaching();
+
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        if (d->jobs.contains(url))
+            return true;
+    }
+
+    auto job = std::make_shared<Private::CachingJob>(this, url);
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        d->jobs.insert(url, job);
+    }
+
+    job->thread = std::thread([this, job] { d->runCaching(job); });
+    return true;
+}
+
+void StreamCache::stopCaching(const QString& url)
+{
+    std::shared_ptr<Private::CachingJob> job;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        job = d->jobs.value(url);
+    }
+
+    if (!job)
+        return;
+
+    // The download notices the flag between blocks, and the interrupt aborts the one in flight.
+    job->stop = true;
+    emit cachingChanged(url);
+}
+
+void StreamCache::reapFinishedCaching()
+{
+    std::vector<std::shared_ptr<Private::CachingJob>> finished;
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        for (auto it = d->jobs.begin(); it != d->jobs.end();)
+        {
+            if (!it.value()->finished)
+            {
+                ++it;
+                continue;
+            }
+
+            finished.push_back(it.value());
+            it = d->jobs.erase(it);
+        }
+    }
+
+    for (const auto& job: finished)
+    {
+        if (job->thread.joinable())
+            job->thread.join();
+    }
 }
 
 void StreamCache::clear()

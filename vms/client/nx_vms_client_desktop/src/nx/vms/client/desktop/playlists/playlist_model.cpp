@@ -132,6 +132,9 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const
                 ? qint64(-1)
                 : playlistManager->durationMs(entry.path);
 
+        case EntryUrlRole:
+            return entry.url;
+
         default:
             return {};
     }
@@ -145,6 +148,7 @@ QHash<int, QByteArray> PlaylistModel::roleNames() const
         {IsFolderRole, "isFolder"},
         {IsStreamRole, "isStream"},
         {DurationMsRole, "durationMs"},
+        {EntryUrlRole, "entryUrl"},
     };
 }
 
