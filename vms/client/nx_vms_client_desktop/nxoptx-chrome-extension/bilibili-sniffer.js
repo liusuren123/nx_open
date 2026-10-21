@@ -47,7 +47,7 @@
     }
 
     /** Adds an item once. Returns it when it was not reported before. */
-    function add(url, kind, label, title)
+    function add(videoKey, url, kind, label, title)
     {
         if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url))
             return null;
@@ -57,7 +57,7 @@
             return null;
 
         reported.add(key);
-        const item = {url, kind, label: label || '', title: title || ''};
+        const item = {url, kind, label: label || '', title: title || '', videoKey};
         items.push(item);
         return item;
     }
@@ -111,7 +111,8 @@
         const found = [];
         for (const entry of data.durl || [])
         {
-            const item = add(entry.url || entry.base_url, 'video', quality, video.title);
+            const item = add(`${video.bvid}|${video.cid}|progressive`,
+                entry.url || entry.base_url, 'video', quality, video.title);
             if (item)
                 found.push(item);
         }
@@ -163,7 +164,8 @@
         const found = [];
         for (const entry of data.durl || [])
         {
-            const item = add(entry.url || entry.base_url, 'video', '', video.title);
+            const item = add(`${video.bvid}|${video.cid}|progressive`,
+                entry.url || entry.base_url, 'video', '', video.title);
             if (item)
                 found.push(item);
         }
@@ -173,7 +175,8 @@
         if (videoTrack)
         {
             const label = videoTrack.height ? `${videoTrack.height}P（无音轨）` : '无音轨';
-            const item = add(videoTrack.baseUrl || videoTrack.base_url, 'video', label, video.title);
+            const item = add(`${video.bvid}|${video.cid}|dash-video`,
+                videoTrack.baseUrl || videoTrack.base_url, 'video', label, video.title);
             if (item)
                 found.push(item);
         }
@@ -181,7 +184,8 @@
         const audioTrack = best(dash.audio, ['bandwidth']);
         if (audioTrack)
         {
-            const item = add(audioTrack.baseUrl || audioTrack.base_url, 'audio', '音频', video.title);
+            const item = add(`${video.bvid}|${video.cid}|dash-audio`,
+                audioTrack.baseUrl || audioTrack.base_url, 'audio', '音频', video.title);
             if (item)
                 found.push(item);
         }

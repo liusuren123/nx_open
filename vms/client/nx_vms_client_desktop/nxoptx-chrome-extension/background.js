@@ -19,6 +19,12 @@ const SEGMENT_EXT = /\.(ts|m4s|cmfv|cmfa|vtt|key|part)(\?|#|$)/i;
 const MAX_ITEMS = 300;
 const NOTIFY_DELAY_MS = 150;
 const STORAGE_KEY = 'media';
+const SCHEME = 'nxoptx';
+
+/** Commands for the player are started one at a time: the browser drops the concurrent ones. */
+const LAUNCH_DELAY_MS = 1500;
+const launchQueue = [];
+let launching = false;
 
 /** url -> item. One list for every tab, kept in discovery order. */
 const media = new Map();
@@ -172,6 +178,11 @@ function remember(url, mime, hint, page)
             existing.label = hint.label;
             changed = true;
         }
+        if (!existing.videoKey && hint && hint.videoKey)
+        {
+            existing.videoKey = hint.videoKey;
+            changed = true;
+        }
         if (!existing.pageUrl && page && page.url)
         {
             existing.pageUrl = page.url;
@@ -201,6 +212,7 @@ function remember(url, mime, hint, page)
         mime: mime || '',
         title: (hint && hint.title) || '',
         label: (hint && hint.label) || '',
+        videoKey: (hint && hint.videoKey) || '',
         origin,
         pageUrl: (page && page.url) || '',
         pageTitle: (page && page.title) || '',
@@ -213,19 +225,22 @@ function remember(url, mime, hint, page)
     return true;
 }
 
-/** Drops what one source of one document reported before, keeping the urls it just reported. */
+/**
+ * Drops what one source of one document reported before, keeping the urls it just reported, and
+ * returns the entries that were dropped.
+ */
 function replaceSource(pageUrl, origin, keep)
 {
-    let changed = false;
+    const removed = [];
     for (const [url, item] of [...media])
     {
         if (item.pageUrl === pageUrl && item.origin === origin && !keep.has(url))
         {
             media.delete(url);
-            changed = true;
+            removed.push(item);
         }
     }
-    return changed;
+    return removed;
 }
 
 /** Drops the resources found in one document, or everything when no document is given. */
@@ -310,6 +325,61 @@ function report(tabId, url, mime)
 {
     if (remember(url, mime, null, tabPages.get(tabId)))
         scheduleRefresh();
+}
+
+/**
+ * Tells the player that a signed address it may hold has been replaced by a fresh one.
+ *
+ * A playlist entry keeps the URL it was added with, and a stream address from a provider like
+ * Bilibili stops working a couple of hours after it was issued. Scanning the page again produces a
+ * new address for the same video; handing it over keeps the entry playable.
+ */
+function refreshClientLinks(tabId, replaced, fresh)
+{
+    if (tabId < 0 || !replaced.length)
+        return;
+
+    const freshByKey = new Map();
+    for (const item of fresh)
+    {
+        if (item.videoKey)
+            freshByKey.set(item.videoKey, item.url);
+    }
+
+    const encode = encodeURIComponent;
+    for (const item of replaced)
+    {
+        const url = item.videoKey ? freshByKey.get(item.videoKey) : undefined;
+        if (!url || url === item.url)
+            continue;
+
+        launchCommand(tabId,
+            `${SCHEME}://replaceStream?url=${encode(item.url)}&newUrl=${encode(url)}`);
+    }
+}
+
+function launchCommand(tabId, uri)
+{
+    launchQueue.push({tabId, uri});
+    pumpLaunches();
+}
+
+function pumpLaunches()
+{
+    if (launching || !launchQueue.length)
+        return;
+
+    launching = true;
+    const {tabId, uri} = launchQueue.shift();
+    chrome.tabs.update(tabId, {url: uri}, () =>
+    {
+        void chrome.runtime.lastError;
+        setTimeout(() =>
+        {
+            launching = false;
+            pumpLaunches();
+        }, LAUNCH_DELAY_MS);
+    });
 }
 
 function headerValue(headers, name)
@@ -407,22 +477,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
 
         if (message?.type === 'register')
         {
-            let changed = false;
-
             // A rescan replaces what the same source reported before: a stream address carries a
             // signature that expires, so the new answer is a fresh address, not another resource.
             const origin = message.origin === 'page' || message.origin === 'dom'
                 ? message.origin
                 : 'net';
             const list = message.items || [];
-            if (message.replace && origin !== 'net' && page.url)
+            const replaced = message.replace && origin !== 'net' && page.url
+                ? replaceSource(page.url, origin, new Set(list.map((item) => item.url)))
+                : [];
+            let changed = replaced.length > 0;
+
+            // A page-world sniffer names the video an address belongs to. The same video may be
+            // reported with a fresh address from another page or another visit, and only the
+            // newest address works, so the older ones are dropped whatever page they came from.
+            const seen = new Set();
+            for (const item of list)
             {
-                changed = replaceSource(page.url, origin, new Set(list.map((item) => item.url)))
-                    || changed;
+                if (!item.videoKey)
+                    continue;
+
+                for (const [url, existing] of [...media])
+                {
+                    if (existing.videoKey !== item.videoKey || url === item.url || seen.has(url))
+                        continue;
+
+                    seen.add(url);
+                    media.delete(url);
+                    replaced.push(existing);
+                    changed = true;
+                }
             }
 
             for (const item of list)
                 changed = remember(item.url, item.mime, {...item, origin}, page) || changed;
+
+            refreshClientLinks(tabId, replaced, list);
             if (changed)
                 scheduleRefresh();
             return {items: allItems()};
