@@ -488,6 +488,61 @@ QString PlaylistManager::entryUrl(const QString& playlistId, int row) const
         : QString();
 }
 
+QVariantMap PlaylistManager::entryStreamInfo(const QString& playlistId, int row) const
+{
+    const auto entries = playlist(playlistId).entries;
+    if (row < 0 || row >= static_cast<int>(entries.size()))
+        return {};
+
+    const PlaylistEntry& entry = entries.at(row);
+    return {
+        {QStringLiteral("url"), entry.url},
+        {QStringLiteral("videoUrl"), entry.videoUrl},
+        {QStringLiteral("audioUrl"), entry.audioUrl},
+        {QStringLiteral("group"), entry.group},
+    };
+}
+
+int PlaylistManager::useCachedFile(const QString& group, const QString& path)
+{
+    if (group.isEmpty() || path.isEmpty())
+        return 0;
+
+    auto list = playlists();
+    QStringList changedIds;
+    int updated = 0;
+    for (Playlist& playlist: list)
+    {
+        bool changed = false;
+        for (PlaylistEntry& entry: playlist.entries)
+        {
+            if (entry.group != group || !entry.isStream())
+                continue;
+
+            // The cached file has both tracks already, so the stream addresses are not needed.
+            entry.path = path;
+            entry.url.clear();
+            entry.videoUrl.clear();
+            entry.audioUrl.clear();
+            entry.group.clear();
+            entry.isFolder = false;
+            changed = true;
+            ++updated;
+        }
+
+        if (changed)
+            changedIds.append(playlist.id.toString());
+    }
+
+    if (!updated)
+        return 0;
+
+    setPlaylists(list);
+    for (const QString& id: changedIds)
+        emit playlistChanged(id);
+    return updated;
+}
+
 QString PlaylistManager::entryDisplayName(const QString& playlistId, int row) const
 {
     const auto entries = playlist(playlistId).entries;

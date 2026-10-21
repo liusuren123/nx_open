@@ -8,6 +8,7 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
+#include <QtCore/QVariantMap>
 
 #include "playlist.h"
 
@@ -118,6 +119,15 @@ public:
 
     /** URL of the entry at the given row; empty when the entry is local media. */
     Q_INVOKABLE QString entryUrl(const QString& playlistId, int row) const;
+
+    /** The stream URL of the entry and, when the provider has them, its high quality tracks. */
+    Q_INVOKABLE QVariantMap entryStreamInfo(const QString& playlistId, int row) const;
+
+    /**
+     * Points the stream entries of the given media at the local file cached for them, keeping the
+     * names. Returns the number of entries that were updated.
+     */
+    Q_INVOKABLE int useCachedFile(const QString& group, const QString& path);
 
     /** Name the entry at the given row is shown under; empty if the row is out of range. */
     Q_INVOKABLE QString entryDisplayName(const QString& playlistId, int row) const;

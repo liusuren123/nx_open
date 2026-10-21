@@ -29,6 +29,20 @@ struct PlaylistEntry
     /** URL of a network stream; empty for a local file or folder. */
     QString url;
 
+    /**
+     * High quality tracks of the same stream, when the provider hands them out separately (a DASH
+     * video and audio pair, for example). Only the local caching uses them: they are downloaded and
+     * merged into one file. Playing the stream itself uses url, which already has both tracks.
+     */
+    QString videoUrl;
+    QString audioUrl;
+
+    /**
+     * Identifies the media behind the URLs across their refreshes, so that a cached copy and a fresh
+     * address still belong together. Empty when the provider gives no such identity.
+     */
+    QString group;
+
     /** Credentials of a stream; ignored for local media. */
     QString username;
     QString password;
@@ -48,7 +62,8 @@ struct PlaylistEntry
 
     bool operator==(const PlaylistEntry& other) const = default;
 };
-NX_REFLECTION_INSTRUMENT(PlaylistEntry, (path)(isFolder)(url)(username)(password)(title))
+NX_REFLECTION_INSTRUMENT(PlaylistEntry,
+    (path)(isFolder)(url)(videoUrl)(audioUrl)(group)(username)(password)(title))
 
 /** A named, ordered collection of local media entries. */
 struct Playlist

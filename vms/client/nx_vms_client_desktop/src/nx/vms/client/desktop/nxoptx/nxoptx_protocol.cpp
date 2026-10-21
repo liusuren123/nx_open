@@ -38,6 +38,9 @@ const auto kPath = QStringLiteral("path");
 const auto kPaths = QStringLiteral("paths");
 const auto kUrl = QStringLiteral("url");
 const auto kNewUrl = QStringLiteral("newUrl");
+const auto kVideoUrl = QStringLiteral("videoUrl");
+const auto kAudioUrl = QStringLiteral("audioUrl");
+const auto kGroup = QStringLiteral("group");
 const auto kItems = QStringLiteral("items");
 const auto kData = QStringLiteral("data");
 const auto kUsername = QStringLiteral("username");
@@ -67,6 +70,7 @@ const QStringList& knownActions()
         QStringLiteral("getSettings"),
         QStringLiteral("setPrefetchConnections"),
         QStringLiteral("cacheStream"),
+        QStringLiteral("cacheMergedStream"),
         QStringLiteral("stopCaching"),
     };
     return actions;
@@ -284,6 +288,11 @@ QJsonObject addStream(PlaylistManager* playlists, const QJsonObject& request)
     entry.username = stringValue(request, kUsername);
     entry.password = stringValue(request, kPassword);
 
+    // High quality tracks the provider hands out separately; only the local cache uses them.
+    entry.videoUrl = stringValue(request, kVideoUrl).trimmed();
+    entry.audioUrl = stringValue(request, kAudioUrl).trimmed();
+    entry.group = stringValue(request, kGroup).trimmed();
+
     // The display name is what the client shows for the entry; `title` is accepted as an alias.
     QString title = stringValue(request, kName).trimmed();
     if (title.isEmpty())
@@ -349,6 +358,9 @@ QJsonObject addStreams(PlaylistManager* playlists, const QJsonObject& request)
         entry.url = url;
         entry.username = stringValue(item, kUsername);
         entry.password = stringValue(item, kPassword);
+        entry.videoUrl = stringValue(item, kVideoUrl).trimmed();
+        entry.audioUrl = stringValue(item, kAudioUrl).trimmed();
+        entry.group = stringValue(item, kGroup).trimmed();
 
         QString title = stringValue(item, kName).trimmed();
         if (title.isEmpty())
@@ -456,6 +468,25 @@ QJsonObject stopCaching(StreamCache* cache, const QJsonObject& request)
     return {{kOk, true}, {kUrl, url}};
 }
 
+/** Downloads two separate tracks of a stream and merges them into one cached file. */
+QJsonObject cacheMergedStream(StreamCache* cache, const QJsonObject& request)
+{
+    if (!cache)
+        return failure(QStringLiteral("unavailable"));
+
+    const QString url = stringValue(request, kUrl).trimmed();
+    const QString videoUrl = stringValue(request, kVideoUrl).trimmed();
+    const QString audioUrl = stringValue(request, kAudioUrl).trimmed();
+    const QString group = stringValue(request, kGroup).trimmed();
+    if (url.isEmpty() || videoUrl.isEmpty() || audioUrl.isEmpty() || group.isEmpty())
+        return failure(QStringLiteral("noUrls"));
+
+    if (!cache->cacheMergedStream(url, videoUrl, audioUrl, group))
+        return failure(QStringLiteral("cannotCache"));
+
+    return {{kOk, true}, {kUrl, url}, {kGroup, group}};
+}
+
 QJsonObject reportSettings(const LocalSettings* localSettings)
 {
     if (!localSettings)
@@ -533,6 +564,8 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
         return setPrefetchConnections(localSettings, request);
     if (action == QLatin1String("cacheStream"))
         return cacheStream(streamCache, request);
+    if (action == QLatin1String("cacheMergedStream"))
+        return cacheMergedStream(streamCache, request);
     if (action == QLatin1String("stopCaching"))
         return stopCaching(streamCache, request);
     if (action == QLatin1String("listPlaylists"))

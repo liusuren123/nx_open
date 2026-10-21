@@ -20,6 +20,8 @@
 #include <QtCore/QStandardPaths>
 
 extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
@@ -110,6 +112,230 @@ QString cacheFilePath(const QString& folder, const QString& url, const char* suf
     const QString name = QString::fromLatin1(
         QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex());
     return QDir(folder).absoluteFilePath(name + QLatin1String(suffix));
+}
+
+/** Size of a remote resource, or 0 when it cannot be told without downloading it. */
+qint64 remoteSize(const QString& url, std::atomic<bool>* stop)
+{
+    AVIOContext* source = nullptr;
+    AVDictionary* options = nullptr;
+    setSourceOptions(&options, url);
+    AVIOInterruptCB interrupt{&interruptCallback, stop};
+    const int result = avio_open2(
+        &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
+    av_dict_free(&options);
+
+    if (result < 0)
+        return 0;
+
+    const qint64 size = avio_size(source);
+    avio_close(source);
+    return size;
+}
+
+/** Copies a remote resource into a file, adding the bytes read to the counter. */
+bool downloadToFile(const QString& url, const QString& path, std::atomic<bool>* stop,
+    std::atomic<qint64>* done)
+{
+    AVIOContext* source = nullptr;
+    AVDictionary* options = nullptr;
+    setSourceOptions(&options, url);
+    AVIOInterruptCB interrupt{&interruptCallback, stop};
+    const int result = avio_open2(
+        &source, url.toUtf8().constData(), AVIO_FLAG_READ, &interrupt, &options);
+    av_dict_free(&options);
+
+    if (result < 0)
+        return false;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        avio_close(source);
+        return false;
+    }
+
+    bool ok = true;
+    std::vector<unsigned char> buffer(256 * 1024);
+    while (!stop->load())
+    {
+        const int read = avio_read(source, buffer.data(), int(buffer.size()));
+        if (read == AVERROR_EOF)
+            break;
+
+        if (read < 0)
+        {
+            ok = false;
+            break;
+        }
+
+        if (read == 0)
+            break;
+
+        if (file.write(reinterpret_cast<const char*>(buffer.data()), read) != read)
+        {
+            ok = false;
+            break;
+        }
+
+        done->fetch_add(read);
+    }
+
+    avio_close(source);
+    file.close();
+
+    if (!ok || stop->load())
+    {
+        QFile::remove(path);
+        return false;
+    }
+
+    return true;
+}
+
+/** Timestamp a packet is ordered by; the decode one when it is there, the presentation one else. */
+qint64 packetTimestamp(const AVPacket* packet)
+{
+    return packet->dts != AV_NOPTS_VALUE ? packet->dts : packet->pts;
+}
+
+/**
+ * Remuxes a video-only file and an audio-only file into one MP4. Nothing is re-encoded: the tracks
+ * are already exactly what the provider handed out.
+ */
+bool mergeTracks(const QString& videoPath, const QString& audioPath, const QString& outputPath)
+{
+    AVFormatContext* videoIn = nullptr;
+    AVFormatContext* audioIn = nullptr;
+    AVFormatContext* out = nullptr;
+    AVPacket* videoPacket = av_packet_alloc();
+    AVPacket* audioPacket = av_packet_alloc();
+    bool ok = false;
+
+    do
+    {
+        if (!videoPacket || !audioPacket)
+            break;
+
+        if (avformat_open_input(&videoIn, videoPath.toUtf8().constData(), nullptr, nullptr) < 0)
+            break;
+        if (avformat_find_stream_info(videoIn, nullptr) < 0)
+            break;
+        if (avformat_open_input(&audioIn, audioPath.toUtf8().constData(), nullptr, nullptr) < 0)
+            break;
+        if (avformat_find_stream_info(audioIn, nullptr) < 0)
+            break;
+
+        const int videoIndex =
+            av_find_best_stream(videoIn, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        const int audioIndex =
+            av_find_best_stream(audioIn, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+        if (videoIndex < 0 || audioIndex < 0)
+            break;
+
+        if (avformat_alloc_output_context2(
+            &out, nullptr, nullptr, outputPath.toUtf8().constData()) < 0 || !out)
+        {
+            break;
+        }
+
+        AVStream* videoOut = avformat_new_stream(out, nullptr);
+        AVStream* audioOut = avformat_new_stream(out, nullptr);
+        if (!videoOut || !audioOut)
+            break;
+
+        if (avcodec_parameters_copy(videoOut->codecpar, videoIn->streams[videoIndex]->codecpar) < 0
+            || avcodec_parameters_copy(audioOut->codecpar, audioIn->streams[audioIndex]->codecpar) < 0)
+        {
+            break;
+        }
+
+        videoOut->codecpar->codec_tag = 0;
+        audioOut->codecpar->codec_tag = 0;
+        videoOut->time_base = videoIn->streams[videoIndex]->time_base;
+        audioOut->time_base = audioIn->streams[audioIndex]->time_base;
+
+        if (avio_open(&out->pb, outputPath.toUtf8().constData(), AVIO_FLAG_WRITE) < 0)
+            break;
+        if (avformat_write_header(out, nullptr) < 0)
+            break;
+
+        // Reads the next packet of one track into its packet, rescaling it to the output stream.
+        const auto readNext = [](AVFormatContext* in, int streamIndex, AVStream* outStream,
+            AVPacket* packet, bool* done, bool* have)
+        {
+            *have = false;
+            if (*done)
+                return;
+
+            while (av_read_frame(in, packet) >= 0)
+            {
+                if (packet->stream_index != streamIndex)
+                {
+                    av_packet_unref(packet);
+                    continue;
+                }
+
+                av_packet_rescale_ts(packet, in->streams[streamIndex]->time_base,
+                    outStream->time_base);
+                packet->stream_index = outStream->index;
+                *have = true;
+                return;
+            }
+
+            *done = true;
+        };
+
+        bool videoDone = false;
+        bool audioDone = false;
+        bool haveVideo = false;
+        bool haveAudio = false;
+        bool written = true;
+
+        readNext(videoIn, videoIndex, videoOut, videoPacket, &videoDone, &haveVideo);
+        readNext(audioIn, audioIndex, audioOut, audioPacket, &audioDone, &haveAudio);
+
+        while (haveVideo || haveAudio)
+        {
+            const bool takeVideo = haveVideo && (!haveAudio
+                || packetTimestamp(videoPacket) <= packetTimestamp(audioPacket));
+
+            if (takeVideo)
+            {
+                written = av_interleaved_write_frame(out, videoPacket) >= 0;
+                if (!written)
+                    break;
+
+                readNext(videoIn, videoIndex, videoOut, videoPacket, &videoDone, &haveVideo);
+            }
+            else
+            {
+                written = av_interleaved_write_frame(out, audioPacket) >= 0;
+                if (!written)
+                    break;
+
+                readNext(audioIn, audioIndex, audioOut, audioPacket, &audioDone, &haveAudio);
+            }
+        }
+
+        ok = written && av_write_trailer(out) >= 0;
+    } while (false);
+
+    av_packet_free(&videoPacket);
+    av_packet_free(&audioPacket);
+
+    if (out)
+    {
+        if (out->pb)
+            avio_closep(&out->pb);
+        avformat_free_context(out);
+    }
+    if (videoIn)
+        avformat_close_input(&videoIn);
+    if (audioIn)
+        avformat_close_input(&audioIn);
+
+    return ok;
 }
 
 } // namespace
@@ -690,11 +916,19 @@ struct StreamCache::Private
         StreamCache* const cache = nullptr;
         const QString url;
 
+        /** Set for a job that downloads two tracks and merges them into one file. */
+        bool merged = false;
+        QString videoUrl;
+        QString audioUrl;
+        QString group;
+
         std::atomic<bool> stop{false};
         std::atomic<bool> finished{false};
         std::atomic<bool> failed{false};
-        std::atomic<int> doneBlocks{0};
-        std::atomic<int> totalBlocks{0};
+
+        /** Blocks of the resource, or bytes of the two tracks when they are merged. */
+        std::atomic<qint64> done{0};
+        std::atomic<qint64> total{0};
 
         std::thread thread;
     };
@@ -704,6 +938,9 @@ struct StreamCache::Private
 
     /** Body of the background thread; must not be called before the job is in the map. */
     void runCaching(const std::shared_ptr<CachingJob>& job);
+
+    /** Body of the background thread for the jobs that merge two tracks. */
+    void runMerged(const std::shared_ptr<CachingJob>& job);
 
     StreamCache* const q = nullptr;
     LocalSettings* const settings = nullptr;
@@ -752,6 +989,12 @@ std::shared_ptr<StreamCacheStorage> StreamCache::Private::storageFor(
 
 void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
 {
+    if (job->merged)
+    {
+        runMerged(job);
+        return;
+    }
+
     StreamCache* const cache = job->cache;
     const QString url = job->url;
     const QString displayUrl = localCameraSourceUrlForDisplay(url);
@@ -803,7 +1046,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
     }
 
     const int blocks = storage->blockCount();
-    job->totalBlocks = blocks;
+    job->total = blocks;
 
     AVIOContext* source = nullptr;
     const auto openSource = [&source, &url, &interrupt]() -> bool
@@ -829,7 +1072,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
     {
         if (storage->hasBlock(index))
         {
-            job->doneBlocks = ++done;
+            job->done = ++done;
             continue;
         }
 
@@ -884,7 +1127,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
         }
 
         storage->writeBlock(index, data);
-        job->doneBlocks = ++done;
+        job->done = ++done;
 
         // The interface shows the progress, and redrawing it for every block is pointless.
         if ((index % 16) == 0)
@@ -903,6 +1146,82 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
     job->failed = failed;
     job->finished = true;
     emit cache->cachingChanged(url);
+}
+
+void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
+{
+    StreamCache* const cache = job->cache;
+    const QString displayUrl = localCameraSourceUrlForDisplay(job->url);
+
+    const auto finish = [&](bool ok)
+    {
+        job->failed = !ok;
+        job->finished = true;
+        emit cache->cachingChanged(job->url);
+    };
+
+    const QString folder = q->folder();
+    const QString mergedFolder = QDir(folder).absoluteFilePath("merged");
+    const QString temporaryFolder = QDir(folder).absoluteFilePath("merged_tmp");
+    if (!nx::utils::file_system::ensureDir(QDir(mergedFolder))
+        || !nx::utils::file_system::ensureDir(QDir(temporaryFolder)))
+    {
+        NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the cache folder is not usable.",
+            displayUrl);
+        finish(false);
+        return;
+    }
+
+    // The merged file is remembered by the identity of the media, not by its address: the address is
+    // refreshed every couple of hours, and the cached copy has to survive that.
+    const QString name = QString::fromLatin1(
+        QCryptographicHash::hash(job->group.toUtf8(), QCryptographicHash::Sha1).toHex());
+    const QString videoPath = QDir(temporaryFolder).absoluteFilePath(name + "-video.m4s");
+    const QString audioPath = QDir(temporaryFolder).absoluteFilePath(name + "-audio.m4s");
+    const QString outputPath = QDir(mergedFolder).absoluteFilePath(name + ".mp4");
+
+    job->total = remoteSize(job->videoUrl, &job->stop)
+        + remoteSize(job->audioUrl, &job->stop);
+
+    const bool videoOk = downloadToFile(job->videoUrl, videoPath, &job->stop, &job->done);
+    const bool audioOk =
+        !job->stop && downloadToFile(job->audioUrl, audioPath, &job->stop, &job->done);
+
+    if (!videoOk || !audioOk || job->stop)
+    {
+        QFile::remove(videoPath);
+        QFile::remove(audioPath);
+        if (!job->stop)
+        {
+            NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the tracks were not downloaded.",
+                displayUrl);
+        }
+        finish(false);
+        return;
+    }
+
+    const bool merged = mergeTracks(videoPath, audioPath, outputPath);
+
+    QFile::remove(videoPath);
+    QFile::remove(audioPath);
+
+    if (!merged)
+    {
+        QFile::remove(outputPath);
+        NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the tracks could not be merged.",
+            displayUrl);
+        finish(false);
+        return;
+    }
+
+    NX_INFO(typeid(StreamCache), "Cached '%1' merged from two tracks (%2 bytes).",
+        displayUrl, QFileInfo(outputPath).size());
+
+    job->done = job->total.load();
+    job->failed = false;
+    job->finished = true;
+    emit cache->cachingChanged(job->url);
+    emit cache->mergedStreamReady(job->group, outputPath);
 }
 
 StreamCache::StreamCache(LocalSettings* settings, QObject* parent):
@@ -1038,11 +1357,11 @@ qreal StreamCache::cachingProgress(const QString& url)
     if (!job)
         return -1;
 
-    const int total = job->totalBlocks.load();
+    const qint64 total = job->total.load();
     if (total <= 0)
         return 0;
 
-    return qMin(qreal(1), qreal(job->doneBlocks.load()) / total);
+    return qMin(qreal(1), qreal(job->done.load()) / total);
 }
 
 bool StreamCache::cacheStream(const QString& url)
@@ -1059,6 +1378,37 @@ bool StreamCache::cacheStream(const QString& url)
     }
 
     auto job = std::make_shared<Private::CachingJob>(this, url);
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        d->jobs.insert(url, job);
+    }
+
+    job->thread = std::thread([this, job] { d->runCaching(job); });
+    return true;
+}
+
+bool StreamCache::cacheMergedStream(const QString& url, const QString& videoUrl,
+    const QString& audioUrl, const QString& group)
+{
+    if (url.isEmpty() || videoUrl.isEmpty() || audioUrl.isEmpty() || group.isEmpty())
+        return false;
+
+    if (!writable())
+        return false;
+
+    reapFinishedCaching();
+
+    {
+        const std::lock_guard<std::mutex> lock(d->mutex);
+        if (d->jobs.contains(url))
+            return true;
+    }
+
+    auto job = std::make_shared<Private::CachingJob>(this, url);
+    job->merged = true;
+    job->videoUrl = videoUrl;
+    job->audioUrl = audioUrl;
+    job->group = group;
     {
         const std::lock_guard<std::mutex> lock(d->mutex);
         d->jobs.insert(url, job);

@@ -107,6 +107,17 @@ Item
         }
     }
 
+    // A merged cache file has both tracks and outlives its addresses: point the entries at it.
+    Connections
+    {
+        target: (typeof streamCache !== "undefined") ? streamCache : null
+
+        function onMergedStreamReady(group, path)
+        {
+            PlaylistManager.useCachedFile(group, path)
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Compact icon button used by the toolbar.
 
@@ -571,6 +582,12 @@ Item
         return entryUrlAt(row).length > 0
     }
 
+    /** The stream URL of the entry, its high quality tracks and the media identity, if any. */
+    function entryStreamInfoAt(row)
+    {
+        return PlaylistManager.entryStreamInfo(PlaylistManager.currentPlaylistId, row)
+    }
+
     /** Path of local media or URL of a stream: whatever identifies the entry. */
     function entryTargetAt(row)
     {
@@ -646,26 +663,38 @@ Item
 
         NxControls.CompactMenuItem
         {
-            readonly property string targetUrl: entryContextMenu.targetRow >= 0
-                ? playlistBrowser.entryUrlAt(entryContextMenu.targetRow)
-                : ""
+            readonly property var info: entryContextMenu.targetRow >= 0
+                ? playlistBrowser.entryStreamInfoAt(entryContextMenu.targetRow)
+                : ({})
+            readonly property string targetUrl: info.url || ""
+            readonly property string highVideo: info.videoUrl || ""
+            readonly property string highAudio: info.audioUrl || ""
+            readonly property string group: info.group || ""
+            readonly property bool merged: highVideo.length > 0 && highAudio.length > 0
+                && group.length > 0
             readonly property real progress: (targetUrl.length > 0
                 && typeof streamCache !== "undefined" && streamCache)
                 ? streamCache.cachingProgress(targetUrl)
                 : -1
-            readonly property bool cached: (targetUrl.length > 0
+            readonly property bool cached: (targetUrl.length > 0 && !merged
                 && typeof streamCache !== "undefined" && streamCache)
                 ? streamCache.isFullyCached(targetUrl)
                 : false
 
             text: progress >= 0
                 ? qsTr("Stop caching")
-                : (cached ? qsTr("Cached") : qsTr("Cache locally"))
+                : (cached
+                    ? qsTr("Cached")
+                    : (merged
+                        ? qsTr("Cache locally (highest quality)")
+                        : qsTr("Cache locally")))
             enabled: targetUrl.length > 0 && !cached
             onTriggered:
             {
                 if (progress >= 0)
                     streamCache.stopCaching(targetUrl)
+                else if (merged)
+                    streamCache.cacheMergedStream(targetUrl, highVideo, highAudio, group)
                 else
                     streamCache.cacheStream(targetUrl)
             }

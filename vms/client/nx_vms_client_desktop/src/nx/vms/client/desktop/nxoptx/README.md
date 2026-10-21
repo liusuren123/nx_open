@@ -49,11 +49,12 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 | `removePlaylist` | 删除 | `playlist` |
 | `setCurrentPlaylist` | 设为“当前播放列表” | `playlist` |
 | `addFile` | 加入本地文件/文件夹 | `playlist`, `path` 或 `paths` |
-| `addStream` | 加入网络流并指定显示名称 | `playlist`, `url`, `name`, `username`, `password` |
+| `addStream` | 加入网络流并指定显示名称 | `playlist`, `url`, `name`, `username`, `password`, `videoUrl`, `audioUrl`, `group` |
 | `addStreams` | 一次加入多条网络流 | `playlist`, `items` 或 `data`（见下） |
 | `removeEntry` | 删除某一行 | `playlist`, `row` |
 | `replaceStream` | 把播放列表里某个流地址换成新地址（签名过期时用） | `url`, `newUrl` |
 | `cacheStream` | 把整条流下载到本地缓存（等同右键「Cache locally」） | `url` |
+| `cacheMergedStream` | 下载两条轨并合并成一个本地文件 | `url`, `videoUrl`, `audioUrl`, `group` |
 | `stopCaching` | 停止正在进行的整片缓存 | `url` |
 | `getSettings` | 读取可调设置 | — |
 | `setPrefetchConnections` | 设置 HLS 预取连接数（1–32），下次播放生效 | `connections` |
@@ -66,7 +67,7 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
   （也可以用别名 `title`，两者都为空时用 URL 作为名称）。
 * `path` / `paths`：单个路径或路径数组。文件夹会被递归展开为其中的媒体文件。
 * `items`：多条流的 JSON 数组，每个元素是 `{"url": "...", "name": "..."}`（也支持
-  `username` / `password` / `title`）。用于“全部添加”：浏览器的外部协议跳转同一时间只能进行
+  `username` / `password` / `title` / `videoUrl` / `audioUrl` / `group`）。用于“全部添加”：浏览器的外部协议跳转同一时间只能进行
   一个，逐条跳转会被后一条取消，所以批量添加必须是一条命令。
 * `data`：与 `items` 相同的 JSON，但先做 zlib 压缩，前面加 4 字节大端未压缩长度，再 base64url
   编码。浏览器拒绝为超过约 2 KB 的外部协议 URL 发起跳转，几条流地址就会超过这个限制，所以
@@ -115,6 +116,21 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 
 响应：`{"ok": true, "url": "..."}`；无法缓存（活流、大小未知、缓存已满）返回
 `{"ok": false, "error": "cannotCache"}`。已下载的块会保留，取消不会丢掉已有进度。
+
+### 分离的高清轨（DASH）
+
+哔哩哔哩的 1080P+ / 4K 只以**分离的视频轨和音频轨**（DASH）提供，单个地址不能直接播放。这种条目
+带着两条轨（`videoUrl` / `audioUrl`）和一个稳定的媒体标识（`group`，如 `bvid|cid`）：
+
+```json
+{"action": "cacheMergedStream", "url": "<渐进式地址>", "videoUrl": "<视频轨>",
+ "audioUrl": "<音频轨>", "group": "BV1xx|cid"}
+```
+
+客户端下载两条轨后用 FFmpeg **原样封装**（不重新编码）成一个 MP4，存放在流缓存的 `merged/` 下，
+文件名取自 `group`（而不是带签名的地址，所以地址刷新后缓存仍然有效）。完成时客户端发出
+`mergedStreamReady(group, path)`，界面把播放列表里该媒体的条目**直接改成这个本地文件**：
+名称保留，之后播放不再联网。
 
 ## 响应
 

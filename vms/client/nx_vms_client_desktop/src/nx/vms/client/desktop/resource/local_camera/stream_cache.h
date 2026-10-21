@@ -113,11 +113,26 @@ public:
     /** Stops a download started by cacheStream(); the blocks already downloaded are kept. */
     Q_INVOKABLE void stopCaching(const QString& url);
 
+    /**
+     * Downloads the two tracks of a stream and merges them into one local file. Used for the quality
+     * levels a provider only offers as separate DASH tracks: the merged file has both picture and
+     * sound, and the cache keeps it under the media identity rather than under the address, which is
+     * refreshed every couple of hours.
+     *
+     * @param url Address of the stream whose progress the interface shows.
+     * @param group Identity of the media; the merged file is remembered by it.
+     */
+    Q_INVOKABLE bool cacheMergedStream(const QString& url, const QString& videoUrl,
+        const QString& audioUrl, const QString& group);
+
 signals:
     void changed();
 
     /** Progress of a download started by cacheStream(), and its completion. */
     void cachingChanged(const QString& url);
+
+    /** The merged file is ready; the entries of that media can be pointed at it. */
+    void mergedStreamReady(const QString& group, const QString& path);
 
 private:
     struct Private;
