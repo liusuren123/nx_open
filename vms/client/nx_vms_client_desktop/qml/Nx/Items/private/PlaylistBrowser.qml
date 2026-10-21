@@ -251,7 +251,7 @@ Item
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: searchField.bottom
-        anchors.bottom: toolbar.top
+        anchors.bottom: playbackErrorBar.top
         anchors.topMargin: 4
 
         clip: true
@@ -377,6 +377,35 @@ Item
             : (searchField.text
                 ? qsTr("Nothing matches the filter")
                 : qsTr("The playlist is empty.\nUse Add to add media files or folders."))
+    }
+
+    // A stream address may carry a signature that has expired; the only fix is scanning the page
+    // it came from again, so the player says so instead of leaving the item silent.
+    Rectangle
+    {
+        id: playbackErrorBar
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: toolbar.top
+        height: playbackErrorText.text === "" ? 0 : playbackErrorText.implicitHeight + 10
+        visible: height > 0
+        color: ColorTheme.colors.dark10
+
+        Text
+        {
+            id: playbackErrorText
+
+            anchors.fill: parent
+            anchors.margins: 5
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            color: ColorTheme.colors.red
+            font.pixelSize: 12
+            text: (typeof playlistPlayer !== "undefined" && playlistPlayer && playlistPlayer.lastError)
+                ? playlistPlayer.lastError
+                : ""
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

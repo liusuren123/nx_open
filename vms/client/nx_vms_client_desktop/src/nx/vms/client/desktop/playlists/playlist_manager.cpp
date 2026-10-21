@@ -386,6 +386,40 @@ bool PlaylistManager::clearEntries(const QString& id)
     return true;
 }
 
+int PlaylistManager::replaceStreamUrl(const QString& oldUrl, const QString& newUrl)
+{
+    if (oldUrl.isEmpty() || newUrl.isEmpty() || oldUrl == newUrl)
+        return 0;
+
+    auto list = playlists();
+    QStringList changedIds;
+    int updated = 0;
+    for (Playlist& playlist: list)
+    {
+        bool changed = false;
+        for (PlaylistEntry& entry: playlist.entries)
+        {
+            if (entry.url != oldUrl)
+                continue;
+
+            entry.url = newUrl;
+            changed = true;
+            ++updated;
+        }
+
+        if (changed)
+            changedIds.append(playlist.id.toString());
+    }
+
+    if (!updated)
+        return 0;
+
+    setPlaylists(list);
+    for (const QString& id: changedIds)
+        emit playlistChanged(id);
+    return updated;
+}
+
 QStringList PlaylistManager::expandedFilePaths(const Playlist& playlist)
 {
     QStringList result;

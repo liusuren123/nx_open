@@ -17,6 +17,13 @@ namespace nx::vms::client::desktop {
 QString localCameraSourceUrlForDisplay(const QString& url);
 
 /**
+ * Moment (Unix seconds) a signed stream address stops working at, read from its `deadline`
+ * parameter, or 0 when the address carries no such stamp. Providers such as Bilibili put it into
+ * the URLs their playback API returns, and the CDN answers 403 once it has passed.
+ */
+qint64 streamUrlDeadlineSec(const QString& url);
+
+/**
  * User agent and referer an HTTP(S) source is opened with.
  *
  * Most sources are served to any client, but some services sign a media address together with the

@@ -3,6 +3,7 @@
 #include "local_camera_source.h"
 
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 
 #include <nx/vms/client/desktop/application_context.h>
 
@@ -68,6 +69,22 @@ QString LocalCameraSource::streamUrl() const
     const QString host = url.mid(hostStart, authorityLimit - hostStart);
 
     return url.left(authorityStart) + userinfo + '@' + host + url.mid(authorityLimit);
+}
+
+qint64 streamUrlDeadlineSec(const QString& url)
+{
+    const int queryStart = url.indexOf('?');
+    if (queryStart < 0)
+        return 0;
+
+    const QUrlQuery query(url.mid(queryStart + 1));
+    const QString deadline = query.queryItemValue(QStringLiteral("deadline"));
+    if (deadline.isEmpty())
+        return 0;
+
+    bool ok = false;
+    const qint64 seconds = deadline.toLongLong(&ok);
+    return ok ? seconds : 0;
 }
 
 QString LocalCameraSource::displayName() const

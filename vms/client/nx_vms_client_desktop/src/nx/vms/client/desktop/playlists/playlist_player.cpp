@@ -2,7 +2,9 @@
 
 #include "playlist_player.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QPointer>
+#include <QtCore/QTimer>
 #include <QtQml/qqml.h>
 
 #include <core/resource/file_processor.h>
@@ -14,6 +16,7 @@
 #include <nx/vms/client/desktop/menu/action_manager.h>
 #include <nx/vms/client/desktop/menu/actions.h>
 #include <nx/vms/client/desktop/playlists/playlist_manager.h>
+#include <nx/vms/client/desktop/resource/local_camera/local_camera_source.h>
 #include <nx/vms/client/desktop/system_context.h>
 #include <nx/vms/client/desktop/workbench/workbench.h>
 #include <camera/resource_display.h>
@@ -137,6 +140,25 @@ void PlaylistPlayer::playPrevious()
     }
 }
 
+void PlaylistPlayer::setLastError(const QString& text)
+{
+    if (m_lastError == text)
+        return;
+
+    m_lastError = text;
+    emit lastErrorChanged();
+
+    if (!text.isEmpty())
+    {
+        // A hint about an expired link is only useful for a moment.
+        QTimer::singleShot(8000, this, [this, text]
+        {
+            if (m_lastError == text)
+                setLastError(QString());
+        });
+    }
+}
+
 void PlaylistPlayer::openCurrentEntry()
 {
     if (m_index < 0 || m_index >= static_cast<int>(m_entries.size()))
@@ -147,11 +169,22 @@ void PlaylistPlayer::openCurrentEntry()
     // A live stream never ends, so there is nothing to hook for advancing to the next entry.
     if (entry.isStream())
     {
+        // The address of a stream may carry a signature that has already run out, in which case
+        // the source cannot be opened at all until the page it came from is scanned again.
+        const qint64 deadline = streamUrlDeadlineSec(entry.url);
+        const bool expired = deadline > 0 && deadline < QDateTime::currentSecsSinceEpoch();
+        setLastError(expired
+            ? tr("The link to '%1' has expired. Open the page in the browser and scan it again.")
+                .arg(entry.displayName())
+            : QString());
+
         m_currentResource.reset();
         if (const auto iptvManager = appContext()->iptvManager())
             iptvManager->openStream(entry.url, entry.title, entry.username, entry.password);
         return;
     }
+
+    setLastError(QString());
 
     const auto resources = QnFileProcessor::createResourcesForFiles(
         {entry.path}, system()->resourcePool());

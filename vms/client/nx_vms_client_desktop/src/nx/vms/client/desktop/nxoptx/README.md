@@ -52,6 +52,7 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 | `addStream` | 加入网络流并指定显示名称 | `playlist`, `url`, `name`, `username`, `password` |
 | `addStreams` | 一次加入多条网络流 | `playlist`, `items` 或 `data`（见下） |
 | `removeEntry` | 删除某一行 | `playlist`, `row` |
+| `replaceStream` | 把播放列表里某个流地址换成新地址（签名过期时用） | `url`, `newUrl` |
 | `getSettings` | 读取可调设置 | — |
 | `setPrefetchConnections` | 设置 HLS 预取连接数（1–32），下次播放生效 | `connections` |
 
@@ -86,6 +87,18 @@ shell 打开这样的 URI 时会启动一个**短命的转发进程**：它把�
 ```
 
 同一个值也可以在客户端「本地设置 → 高级」里的「HLS Prefetch Connections」调整。
+
+## 刷新过期的流地址
+
+流媒体服务（例如哔哩哔哩）给出的地址带着**时效签名**，一般两小时后就会返回 403。
+扩展在重新扫描到同一个视频后，会拿新地址调用这个动作，把所有播放列表里的旧地址直接替换掉
+（名称不变）：
+
+```json
+{"action": "replaceStream", "url": "<旧地址>", "newUrl": "<新地址>"}
+```
+
+响应：`{"ok": true, "updated": 2}`，`updated` 是被替换的条目数（0 表示列表里没有这个旧地址）。
 
 ## 响应
 

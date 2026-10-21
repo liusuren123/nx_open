@@ -569,6 +569,19 @@ bool LocalCameraArchiveDelegate::openUrl()
             return true;
     }
 
+    // A signed address that has run out is not going to work again, and saying so is more useful
+    // than the 403 it produces.
+    const qint64 deadline = streamUrlDeadlineSec(d->url);
+    if (deadline > 0 && deadline < QDateTime::currentSecsSinceEpoch())
+    {
+        d->lastError = tr("The link to '%1' has expired (it was valid until %2). Open the page "
+            "in the browser and scan it again.")
+            .arg(localCameraSourceUrlForDisplay(d->url),
+                QDateTime::fromSecsSinceEpoch(deadline).toString(
+                    QStringLiteral("yyyy-MM-dd HH:mm")));
+        return false;
+    }
+
     d->lastError = tr("Failed to open stream '%1': %2.")
         .arg(localCameraSourceUrlForDisplay(d->url), lastError);
     return false;

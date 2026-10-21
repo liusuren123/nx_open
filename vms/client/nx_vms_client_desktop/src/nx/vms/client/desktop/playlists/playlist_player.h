@@ -26,6 +26,7 @@ namespace nx::vms::client::desktop {
 class PlaylistPlayer: public QObject, public WindowContextAware
 {
     Q_OBJECT
+    Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
 
 public:
     explicit PlaylistPlayer(WindowContext* context, QObject* parent = nullptr);
@@ -42,7 +43,16 @@ public:
      */
     Q_INVOKABLE void setCurrentPlaylist(const QString& playlistId);
 
+    /**
+     * Why the last entry could not be played, or an empty string. Used for a stream address whose
+     * signature has expired, which the user can only fix by scanning the page again.
+     */
+    QString lastError() const { return m_lastError; }
+
     static void registerQmlType();
+
+signals:
+    void lastErrorChanged();
 
 private:
     /** Rebuilds the flat list of playable entries. */
@@ -50,6 +60,7 @@ private:
     /** Appends the given playlist entry, expanding folders into their media files. */
     void appendExpanded(const PlaylistEntry& entry);
     void openCurrentEntry();
+    void setLastError(const QString& text);
 
     /**
      * Disables looping for the widget of the entry being played and makes it advance to the next
@@ -61,6 +72,7 @@ private:
     QList<PlaylistEntry> m_entries;
     int m_index = -1;
     QnResourcePtr m_currentResource;
+    QString m_lastError;
 };
 
 } // namespace nx::vms::client::desktop

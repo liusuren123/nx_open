@@ -94,6 +94,13 @@ public:
     Q_INVOKABLE bool moveEntry(const QString& id, int fromRow, int toRow);
     Q_INVOKABLE bool clearEntries(const QString& id);
 
+    /**
+     * Replaces the URL of every entry that points to the given stream with a fresh one, keeping the
+     * name. Used when a signed stream address (a Bilibili link, for example) expires and the browser
+     * hands over a new one. Returns the number of entries that were updated.
+     */
+    Q_INVOKABLE int replaceStreamUrl(const QString& oldUrl, const QString& newUrl);
+
     /** Replaces the whole entry list of the given playlist. */
     bool setEntries(const QString& id, const QList<PlaylistEntry>& entries);
 

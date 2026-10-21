@@ -36,6 +36,7 @@ const auto kTitle = QStringLiteral("title");
 const auto kPath = QStringLiteral("path");
 const auto kPaths = QStringLiteral("paths");
 const auto kUrl = QStringLiteral("url");
+const auto kNewUrl = QStringLiteral("newUrl");
 const auto kItems = QStringLiteral("items");
 const auto kData = QStringLiteral("data");
 const auto kUsername = QStringLiteral("username");
@@ -61,6 +62,7 @@ const QStringList& knownActions()
         QStringLiteral("addStreams"),
         QStringLiteral("renameEntry"),
         QStringLiteral("removeEntry"),
+        QStringLiteral("replaceStream"),
         QStringLiteral("getSettings"),
         QStringLiteral("setPrefetchConnections"),
     };
@@ -407,6 +409,21 @@ QJsonObject removeEntry(PlaylistManager* playlists, const QJsonObject& request)
     return {{kOk, true}, {kPlaylist, id}, {kRow, row}};
 }
 
+/** Swaps an expired stream address for a fresh one in every playlist that holds it. */
+QJsonObject replaceStream(PlaylistManager* playlists, const QJsonObject& request)
+{
+    const QString url = stringValue(request, kUrl).trimmed();
+    if (url.isEmpty())
+        return failure(QStringLiteral("noUrl"));
+
+    const QString newUrl = stringValue(request, kNewUrl).trimmed();
+    if (newUrl.isEmpty())
+        return failure(QStringLiteral("noNewUrl"));
+
+    const int updated = playlists->replaceStreamUrl(url, newUrl);
+    return {{kOk, true}, {QStringLiteral("updated"), updated}};
+}
+
 QJsonObject reportSettings(const LocalSettings* localSettings)
 {
     if (!localSettings)
@@ -502,6 +519,8 @@ QJsonObject execute(const QJsonObject& request, PlaylistManager* playlists,
         return renameEntry(playlists, request);
     if (action == QLatin1String("removeEntry"))
         return removeEntry(playlists, request);
+    if (action == QLatin1String("replaceStream"))
+        return replaceStream(playlists, request);
 
     NX_WARNING(kLogTag, "No handler for the action '%1'.", action);
     return failure(QStringLiteral("unknownAction"));
