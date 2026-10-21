@@ -526,6 +526,12 @@ int PlaylistManager::useCachedFile(const QString& group, const QString& path)
             entry.audioUrl.clear();
             entry.group.clear();
             entry.isFolder = false;
+
+            // The sniffer marks a video-only stream in its name; the file has sound now.
+            static const QString kNoAudioMarker = QStringLiteral("（无音轨）");
+            if (entry.title.endsWith(kNoAudioMarker))
+                entry.title.chop(kNoAudioMarker.size());
+
             changed = true;
             ++updated;
         }
