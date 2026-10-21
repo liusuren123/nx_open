@@ -85,43 +85,81 @@
     }
 
     /**
-     * Asks for a progressive stream: one MP4 that already contains both tracks. The quality is
-     * whatever the account is allowed, which is up to 1080p when signed in and usually 720p
-     * otherwise. Asking for more than is allowed is safe: the API answers with the best it has.
+     * Asks the playurl API for one form of the stream.
+     *
+     * `params.fnval` selects it: 16 is DASH, whose tracks carry 1080P+ / 4K / HDR / 8K, and 1 is a
+     * progressive MP4 - one file with both tracks that a player can open as it is, but no better
+     * than 1080P. `qn=127` asks for the highest quality; the API answers with what the account is
+     * allowed to play. The account cookie is sent along, so a signed-in user gets their tier.
      */
-    async function progressive(video)
+    async function requestPlayurl(video, params)
     {
-        // fnval 17 asks for both forms at once: durl is a progressive MP4 that a player can open as
-        // it is (capped at 1080p), dash carries the higher qualities as separate video and audio
-        // tracks. The item points at the first and keeps the other two for local caching.
-        const query = `bvid=${encodeURIComponent(video.bvid)}`
-            + `&cid=${encodeURIComponent(video.cid)}`
-            + '&fnval=17&fnver=0&fourk=1&qn=127&platform=html5&high_quality=1';
+        const query = new URLSearchParams({
+            bvid: video.bvid,
+            cid: String(video.cid),
+            qn: '127',
+            fnver: '0',
+            fourk: '1',
+            ...params,
+        });
 
-        const response = await fetch(`https://api.bilibili.com/x/player/playurl?${query}`,
-            {credentials: 'include'});
-        if (!response.ok)
-            return [];
+        try
+        {
+            const response = await fetch(`https://api.bilibili.com/x/player/playurl?${query}`,
+                {credentials: 'include'});
+            if (!response.ok)
+                return null;
 
-        const json = await response.json();
-        if (!json || json.code !== 0)
-            return [];
+            const json = await response.json();
+            return json && json.code === 0 ? (json.data || null) : null;
+        }
+        catch (error)
+        {
+            return null;
+        }
+    }
 
-        const data = json.data || {};
-        const dash = data.dash || {};
+    /** Name of a player quality id, e.g. 80 -> "1080P". */
+    function qualityLabel(quality)
+    {
+        const id = Number(quality) || 0;
+        return QUALITY_NAMES[id] || (id ? `qn${id}` : '');
+    }
+
+    function trackUrl(track)
+    {
+        return track ? (track.baseUrl || track.base_url || '') : '';
+    }
+
+    /**
+     * Collects what the account can play: the progressive MP4 and, when it is better than the
+     * progressive one, the highest DASH video track. The tracks themselves need their signatures,
+     * so they are asked for separately: a single request stops at 1080P.
+     */
+    async function collect(video)
+    {
+        const [dashData, mp4Data] = await Promise.all([
+            requestPlayurl(video, {fnval: '16', qn: '127', platform: 'pc'}),
+            requestPlayurl(video, {fnval: '1', qn: '80', platform: 'html5', high_quality: '1'}),
+        ]);
+
+        const dash = (dashData && dashData.dash) || {};
         const videoTrack = best(dash.video, ['height', 'bandwidth']);
         const audioTrack = best(dash.audio, ['bandwidth']);
-        const highVideo = videoTrack ? (videoTrack.baseUrl || videoTrack.base_url) : '';
-        const highAudio = audioTrack ? (audioTrack.baseUrl || audioTrack.base_url) : '';
-
-        const quality = QUALITY_NAMES[data.quality]
-            || (data.quality ? `qn${data.quality}` : '');
+        const highVideo = trackUrl(videoTrack);
+        const highAudio = trackUrl(audioTrack);
 
         const found = [];
-        for (const entry of data.durl || [])
+
+        const durl = (mp4Data && mp4Data.durl) || (dashData && dashData.durl) || [];
+        const progressiveQuality = Number(
+            (mp4Data && mp4Data.quality) || (dashData && dashData.quality) || 0);
+
+        for (const entry of durl)
         {
             const item = add(`${video.bvid}|${video.cid}|progressive`,
-                entry.url || entry.base_url, 'video', quality, video.title);
+                entry.url || entry.base_url, 'video', qualityLabel(progressiveQuality),
+                video.title);
             if (item)
             {
                 attachHighTracks(item, video, highVideo, highAudio);
@@ -129,13 +167,13 @@
             }
         }
 
-        // Some videos have no progressive form at all. The highest DASH track is then the only
-        // address there is; its sound arrives once the item has been cached locally.
-        if (!found.length && highVideo)
+        // 1080P+ / 4K / HDR exist only as a separate video track, so they get an entry of their
+        // own. It has no sound until the two tracks are cached and merged into one file.
+        const videoQuality = videoTrack ? Number(videoTrack.id) || 0 : 0;
+        if (highVideo && videoQuality > progressiveQuality)
         {
-            const label = videoTrack.height ? `${videoTrack.height}P（无音轨）` : '无音轨';
-            const item = add(`${video.bvid}|${video.cid}|dash-video`, highVideo, 'video', label,
-                video.title);
+            const item = add(`${video.bvid}|${video.cid}|dash-video`, highVideo, 'video',
+                `${qualityLabel(videoQuality)}（无音轨）`, video.title);
             if (item)
             {
                 attachHighTracks(item, video, highVideo, highAudio);
@@ -245,7 +283,7 @@
         querying = true;
         try
         {
-            if (!(await progressive(video)).length)
+            if (!(await collect(video)).length)
                 fromPlayInfo(video);
             post();
         }

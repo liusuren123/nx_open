@@ -138,21 +138,15 @@
         return base;
     }
 
-    function buildUri(item, name)
+    function entryOf(item, name)
     {
-        const playlist = settings.playlist.trim();
-        const encode = encodeURIComponent;
-        let uri = `${SCHEME}://addStream?url=${encode(item.url)}&name=${encode(name)}`;
-
-        // The high quality tracks are only used when the item is cached locally.
-        if (item.videoUrl)
-            uri += `&videoUrl=${encode(item.videoUrl)}`;
-        if (item.audioUrl)
-            uri += `&audioUrl=${encode(item.audioUrl)}`;
-        if (item.group)
-            uri += `&group=${encode(item.group)}`;
-
-        return uri + (playlist ? `&playlist=${encode(playlist)}` : '');
+        return {
+            url: item.url,
+            name: name || suggestedName(item),
+            videoUrl: item.videoUrl || '',
+            audioUrl: item.audioUrl || '',
+            group: item.group || '',
+        };
     }
 
     /**
@@ -184,6 +178,8 @@
      * protocol navigation at a time, so separate launches cancel each other and only the last
      * stream would arrive.
      */
+    const MAX_COMMAND_LENGTH = 1500;
+
     async function buildBatchUri(entries)
     {
         const payload = JSON.stringify(entries.map(
@@ -209,10 +205,25 @@
         anchor.remove();
     }
 
-    function addItem(item, name, row)
+    /**
+     * Even a single item carries three addresses (the stream and the two high quality tracks), and a
+     * command of that length is silently dropped by the browser, so single additions go through the
+     * same compressed form as a batch.
+     */
+    async function addItem(item, name, row)
     {
-        openUri(buildUri(item, name || suggestedName(item)));
-        setStatus(row, '已发送到播放器', false);
+        try
+        {
+            const uri = await buildBatchUri([entryOf(item, name)]);
+            openUri(uri);
+            setStatus(row, uri.length > MAX_COMMAND_LENGTH
+                ? '命令过长，浏览器可能丢弃'
+                : '已发送到播放器', uri.length > MAX_COMMAND_LENGTH);
+        }
+        catch (error)
+        {
+            setStatus(row, `添加失败：${error?.message || error}`, true);
+        }
     }
 
     async function copyText(text, row)
@@ -370,22 +381,17 @@
                 return;
 
             const rows = [...list.children];
-            const entries = items.map((item, index) =>
-            {
-                const input = rows[index]?.querySelector('.nx-name');
-                return {
-                    url: item.url,
-                    name: input?.value.trim() || suggestedName(item),
-                    videoUrl: item.videoUrl || '',
-                    audioUrl: item.audioUrl || '',
-                    group: item.group || '',
-                };
-            });
+            const entries = items.map(
+                (item, index) => entryOf(item, rows[index]?.querySelector('.nx-name')?.value.trim()));
 
-            openUri(await buildBatchUri(entries));
+            const uri = await buildBatchUri(entries);
+            openUri(uri);
 
+            const tooLong = uri.length > MAX_COMMAND_LENGTH;
             for (const row of rows)
-                setStatus(row, '已发送到播放器', false);
+            {
+                setStatus(row, tooLong ? '命令过长，浏览器可能丢弃' : '已发送到播放器', tooLong);
+            }
         });
 
         rescanButton = document.createElement('button');
@@ -545,6 +551,10 @@
         updateRescanButton();
         clearTimeout(rescanTimer);
         rescanTimer = setTimeout(updateRescanButton, 1200);
+
+        // An explicit rescan is a request to find everything again, including what the user
+        // removed from the list by hand.
+        await request({type: 'undismiss', pageUrl: location.href});
 
         await registerItems(scanDocument(), {origin: 'dom', replace: true});
         window.postMessage({source: 'nxoptx-content', type: 'rescan'}, '*');

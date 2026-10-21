@@ -17,6 +17,7 @@ const AUDIO_EXT = /\.(mp3|m4a|aac|ogg|oga|opus|flac|wav|weba)(\?|#|$)/i;
 const SEGMENT_EXT = /\.(ts|m4s|cmfv|cmfa|vtt|key|part)(\?|#|$)/i;
 
 const MAX_ITEMS = 300;
+const MAX_DISMISSED = 1000;
 const NOTIFY_DELAY_MS = 150;
 const STORAGE_KEY = 'media';
 const SCHEME = 'nxoptx';
@@ -28,6 +29,13 @@ let launching = false;
 
 /** url -> item. One list for every tab, kept in discovery order. */
 const media = new Map();
+
+/**
+ * url -> page URL of the resources the user removed on purpose. Such a URL is not sniffed back
+ * while the page that reported it is still open, so clearing the list of a playing page does not
+ * undo itself a moment later. The set lives as long as the service worker does.
+ */
+const dismissed = new Map();
 
 /** tabId -> {url, title} of the document that is currently loaded in the tab. */
 const tabPages = new Map();
@@ -152,6 +160,10 @@ function remember(url, mime, hint, page)
     if (!kind)
         return false;
 
+    // Removed by the user: automatic sniffing must not bring it back.
+    if (dismissed.has(url))
+        return false;
+
     // Where the resource was found: a request, the page's DOM, or a page-world sniffer. A rescan
     // replaces the entries of the source it re-scanned and leaves the others alone.
     const origin = hint && (hint.origin === 'dom' || hint.origin === 'page') ? hint.origin : 'net';
@@ -264,14 +276,51 @@ function replaceSource(pageUrl, origin, keep)
 /** Drops the resources found in one document, or everything when no document is given. */
 function clearItems(pageUrl)
 {
-    let changed = false;
+    const removed = [];
     for (const [url, item] of [...media])
     {
         if (!pageUrl || item.pageUrl === pageUrl)
         {
             media.delete(url);
-            changed = true;
+            removed.push(item);
         }
+    }
+    return removed;
+}
+
+/** Keeps the given resources out of the list until the page they belong to is rescanned. */
+function dismiss(items)
+{
+    let changed = false;
+    for (const item of items)
+    {
+        if (dismissed.has(item.url))
+            continue;
+
+        dismissed.set(item.url, item.pageUrl || '');
+        changed = true;
+    }
+
+    while (dismissed.size > MAX_DISMISSED)
+        dismissed.delete(dismissed.keys().next().value);
+
+    return changed;
+}
+
+/**
+ * Forgets that resources of the given document were removed, i.e. lets a rescan find them again.
+ * When no document is given, nothing stays dismissed anymore.
+ */
+function undismiss(pageUrl)
+{
+    let changed = false;
+    for (const url of [...dismissed.keys()])
+    {
+        if (pageUrl && dismissed.get(url) !== pageUrl)
+            continue;
+
+        dismissed.delete(url);
+        changed = true;
     }
     return changed;
 }
@@ -551,16 +600,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
 
         if (message?.type === 'remove')
         {
-            if (media.delete(message.url))
+            const item = media.get(message.url);
+            if (item && media.delete(item.url))
+            {
+                dismiss([item]);
                 scheduleRefresh();
+            }
             return {items: allItems()};
         }
 
         if (message?.type === 'clear')
         {
-            // The panel clears its own page; the popup clears the whole list.
-            if (clearItems(message.pageUrl || ''))
+            // The page panel clears the resources of its own document; the toolbar popup clears
+            // the whole list, whatever document is open in the browser.
+            const pageUrl = message.all ? '' : String(message.pageUrl || page.url || '');
+            const removed = clearItems(pageUrl);
+
+            // Removed on purpose: sniffing the same page again must not undo this.
+            if (removed.length && dismiss(removed))
                 scheduleRefresh();
+
+            return {items: allItems()};
+        }
+
+        if (message?.type === 'undismiss')
+        {
+            // An explicit rescan is a request to find everything again, including what was
+            // removed from the list.
+            if (undismiss(String(message.pageUrl || page.url || '')))
+                scheduleRefresh();
+
             return {items: allItems()};
         }
 

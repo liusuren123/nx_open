@@ -19,6 +19,7 @@ const elements = {
     list: document.getElementById('list'),
     empty: document.getElementById('empty'),
     addAll: document.getElementById('addAll'),
+    clearAll: document.getElementById('clearAll'),
     rescan: document.getElementById('rescan'),
     showPanel: document.getElementById('showPanel'),
     autoExpand: document.getElementById('autoExpand'),
@@ -32,6 +33,7 @@ let pageTitle = '';
 let rescanning = false;
 let lastKey = null;
 let refreshSeq = 0;
+let clearConfirmTimer = 0;
 
 function request(message)
 {
@@ -72,21 +74,15 @@ function suggestedName(item)
     return base.length > 60 ? `${base.slice(0, 59)}…` : base;
 }
 
-function buildUri(item, name)
+function entryOf(item, name)
 {
-    const playlist = settings.playlist.trim();
-    const encode = encodeURIComponent;
-    let uri = `${SCHEME}://addStream?url=${encode(item.url)}&name=${encode(name)}`;
-
-    // The high quality tracks are only used when the item is cached locally.
-    if (item.videoUrl)
-        uri += `&videoUrl=${encode(item.videoUrl)}`;
-    if (item.audioUrl)
-        uri += `&audioUrl=${encode(item.audioUrl)}`;
-    if (item.group)
-        uri += `&group=${encode(item.group)}`;
-
-    return uri + (playlist ? `&playlist=${encode(playlist)}` : '');
+    return {
+        url: item.url,
+        name: name || suggestedName(item),
+        videoUrl: item.videoUrl || '',
+        audioUrl: item.audioUrl || '',
+        group: item.group || '',
+    };
 }
 
 /**
@@ -254,10 +250,23 @@ function renderItem(item, index)
     add.type = 'button';
     add.className = 'primary';
     add.textContent = '添加到播放器';
-    add.addEventListener('click', () =>
+    add.addEventListener('click', async () =>
     {
-        openUri(buildUri(item, name.value.trim() || suggestedName(item)));
-        setStatus(row, '已发送到播放器', false);
+        // A single item may still carry three addresses (the stream and the two high quality
+        // tracks). A plain command of that length is silently dropped by the browser, so single
+        // additions go through the same compressed form as a batch.
+        try
+        {
+            const uri = await buildBatchUri([entryOf(item, name.value.trim())]);
+            await openUri(uri);
+            setStatus(row, uri.length > MAX_COMMAND_LENGTH
+                ? '命令过长，浏览器可能丢弃'
+                : '已发送到播放器', uri.length > MAX_COMMAND_LENGTH);
+        }
+        catch (error)
+        {
+            setStatus(row, `添加失败：${error?.message || error}`, true);
+        }
     });
 
     const copy = document.createElement('button');
@@ -307,7 +316,13 @@ function render()
     elements.empty.style.display = hasItems ? 'none' : 'block';
     elements.addAll.disabled = !hasItems;
     elements.clear.disabled = !hasItems;
+    elements.clearAll.disabled = !hasItems;
     elements.rescan.disabled = tabId < 0 || rescanning;
+
+    if (!hasItems)
+        resetClearAllButton();
+    else if (elements.clearAll.classList.contains('danger'))
+        elements.clearAll.textContent = `确认清空 ${items.length} 条？`;
 
     elements.subtitle.textContent = hasItems
         ? `已记录 ${items.length} 个媒体资源`
@@ -343,23 +358,30 @@ async function refresh()
         apply(reply.items);
 }
 
+function resetClearAllButton()
+{
+    clearTimeout(clearConfirmTimer);
+    clearConfirmTimer = 0;
+    elements.clearAll.classList.remove('danger');
+    elements.clearAll.textContent = '清空全部记录';
+}
+
+/** `all` is what makes the request drop every page's resources, not only the open tab's. */
+async function clearAll()
+{
+    const reply = await request({type: 'clear', all: true, tabId});
+    if (reply)
+        apply(reply.items);
+}
+
 elements.addAll.addEventListener('click', async () =>
 {
     if (!items.length)
         return;
 
     const rows = [...elements.list.children];
-    const entries = items.map((item, index) =>
-    {
-        const input = rows[index]?.querySelector('.name');
-        return {
-            url: item.url,
-            name: input?.value.trim() || suggestedName(item),
-            videoUrl: item.videoUrl || '',
-            audioUrl: item.audioUrl || '',
-            group: item.group || '',
-        };
-    });
+    const entries = items.map(
+        (item, index) => entryOf(item, rows[index]?.querySelector('.name')?.value.trim()));
 
     try
     {
@@ -393,11 +415,25 @@ elements.addAll.addEventListener('click', async () =>
         setStatus(row, '已发送到播放器', false);
 });
 
-elements.clear.addEventListener('click', async () =>
+elements.clear.addEventListener('click', clearAll);
+
+/** The list is cleared in two steps: a stray click must not throw away a long list. */
+elements.clearAll.addEventListener('click', () =>
 {
-    const reply = await request({type: 'clear', tabId});
-    if (reply)
-        apply(reply.items);
+    if (!items.length)
+        return;
+
+    if (!elements.clearAll.classList.contains('danger'))
+    {
+        elements.clearAll.classList.add('danger');
+        elements.clearAll.textContent = `确认清空 ${items.length} 条？`;
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = setTimeout(resetClearAllButton, 4000);
+        return;
+    }
+
+    resetClearAllButton();
+    clearAll();
 });
 
 /** The popup cannot run the sniffer itself, so it asks the content script of the tab to do it. */

@@ -13,7 +13,7 @@
       <div class="title">Nx Optx 媒体嗅探器</div>
       <div class="subtitle" id="subtitle">正在检查当前页面…</div>
     </div>
-    <button type="button" class="icon" id="clear" title="清空当前页面的结果">×</button>
+    <button type="button" class="icon" id="clear" title="清空全部记录">×</button>
   </header>
 
   <section class="settings">
@@ -37,7 +37,10 @@
   <p class="empty" id="empty">还没有发现媒体资源。播放页面上的视频或音频，它们会出现在这里。</p>
 
   <footer class="foot">
-    <button type="button" class="primary" id="addAll">全部添加</button>
+    <div class="foot-actions">
+      <button type="button" class="primary" id="addAll">全部添加</button>
+      <button type="button" class="ghost" id="clearAll">清空全部记录</button>
+    </div>
     <span class="hint">需要播放器正在运行并已注册 nxoptx:// 协议</span>
   </footer>
 

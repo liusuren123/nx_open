@@ -217,6 +217,17 @@ button.icon:hover {
   background: #333333;
 }
 
+button.danger {
+  border-color: #a33a3a;
+  background: #a33a3a;
+  color: #ffffff;
+}
+
+button.danger:hover {
+  border-color: #bf4444;
+  background: #bf4444;
+}
+
 .empty {
   margin: 6px 2px;
   color: #8f8f8f;
@@ -225,11 +236,21 @@ button.icon:hover {
 
 .foot {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #303030;
+}
+
+.foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.foot-actions button {
+  flex: 1 1 auto;
 }
 
 .hint {
