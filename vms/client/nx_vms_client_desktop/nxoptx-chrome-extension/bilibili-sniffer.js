@@ -91,9 +91,12 @@
      */
     async function progressive(video)
     {
+        // fnval 17 asks for both forms at once: durl is a progressive MP4 that a player can open as
+        // it is (capped at 1080p), dash carries the higher qualities as separate video and audio
+        // tracks. The item points at the first and keeps the other two for local caching.
         const query = `bvid=${encodeURIComponent(video.bvid)}`
             + `&cid=${encodeURIComponent(video.cid)}`
-            + '&fnval=1&fnver=0&fourk=1&qn=80&platform=html5&high_quality=1';
+            + '&fnval=17&fnver=0&fourk=1&qn=127&platform=html5&high_quality=1';
 
         const response = await fetch(`https://api.bilibili.com/x/player/playurl?${query}`,
             {credentials: 'include'});
@@ -105,6 +108,12 @@
             return [];
 
         const data = json.data || {};
+        const dash = data.dash || {};
+        const videoTrack = best(dash.video, ['height', 'bandwidth']);
+        const audioTrack = best(dash.audio, ['bandwidth']);
+        const highVideo = videoTrack ? (videoTrack.baseUrl || videoTrack.base_url) : '';
+        const highAudio = audioTrack ? (audioTrack.baseUrl || audioTrack.base_url) : '';
+
         const quality = QUALITY_NAMES[data.quality]
             || (data.quality ? `qn${data.quality}` : '');
 
@@ -114,9 +123,38 @@
             const item = add(`${video.bvid}|${video.cid}|progressive`,
                 entry.url || entry.base_url, 'video', quality, video.title);
             if (item)
+            {
+                attachHighTracks(item, video, highVideo, highAudio);
                 found.push(item);
+            }
         }
+
+        // Some videos have no progressive form at all. The highest DASH track is then the only
+        // address there is; its sound arrives once the item has been cached locally.
+        if (!found.length && highVideo)
+        {
+            const label = videoTrack.height ? `${videoTrack.height}P（无音轨）` : '无音轨';
+            const item = add(`${video.bvid}|${video.cid}|dash-video`, highVideo, 'video', label,
+                video.title);
+            if (item)
+            {
+                attachHighTracks(item, video, highVideo, highAudio);
+                found.push(item);
+            }
+        }
+
         return found;
+    }
+
+    /** Keeps the high quality tracks on the item; only the local cache uses them. */
+    function attachHighTracks(item, video, videoUrl, audioUrl)
+    {
+        if (!videoUrl || !audioUrl)
+            return;
+
+        item.videoUrl = videoUrl;
+        item.audioUrl = audioUrl;
+        item.group = `${video.bvid}|${video.cid}`;
     }
 
     /** Lexicographic comparison of two numeric key tuples. */

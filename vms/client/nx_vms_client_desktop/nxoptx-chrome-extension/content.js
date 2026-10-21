@@ -142,8 +142,17 @@
     {
         const playlist = settings.playlist.trim();
         const encode = encodeURIComponent;
-        return `${SCHEME}://addStream?url=${encode(item.url)}&name=${encode(name)}`
-            + (playlist ? `&playlist=${encode(playlist)}` : '');
+        let uri = `${SCHEME}://addStream?url=${encode(item.url)}&name=${encode(name)}`;
+
+        // The high quality tracks are only used when the item is cached locally.
+        if (item.videoUrl)
+            uri += `&videoUrl=${encode(item.videoUrl)}`;
+        if (item.audioUrl)
+            uri += `&audioUrl=${encode(item.audioUrl)}`;
+        if (item.group)
+            uri += `&group=${encode(item.group)}`;
+
+        return uri + (playlist ? `&playlist=${encode(playlist)}` : '');
     }
 
     /**
@@ -177,7 +186,8 @@
      */
     async function buildBatchUri(entries)
     {
-        const payload = JSON.stringify(entries.map(({url, name}) => ({url, name})));
+        const payload = JSON.stringify(entries.map(
+            ({url, name, videoUrl, audioUrl, group}) => ({url, name, videoUrl, audioUrl, group})));
         const packed = await packPayload(payload);
         const playlist = settings.playlist.trim();
         const encode = encodeURIComponent;
@@ -363,7 +373,13 @@
             const entries = items.map((item, index) =>
             {
                 const input = rows[index]?.querySelector('.nx-name');
-                return {url: item.url, name: input?.value.trim() || suggestedName(item)};
+                return {
+                    url: item.url,
+                    name: input?.value.trim() || suggestedName(item),
+                    videoUrl: item.videoUrl || '',
+                    audioUrl: item.audioUrl || '',
+                    group: item.group || '',
+                };
             });
 
             openUri(await buildBatchUri(entries));

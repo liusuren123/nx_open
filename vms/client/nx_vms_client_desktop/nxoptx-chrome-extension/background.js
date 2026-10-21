@@ -183,6 +183,21 @@ function remember(url, mime, hint, page)
             existing.videoKey = hint.videoKey;
             changed = true;
         }
+        if (!existing.videoUrl && hint && hint.videoUrl)
+        {
+            existing.videoUrl = hint.videoUrl;
+            changed = true;
+        }
+        if (!existing.audioUrl && hint && hint.audioUrl)
+        {
+            existing.audioUrl = hint.audioUrl;
+            changed = true;
+        }
+        if (!existing.group && hint && hint.group)
+        {
+            existing.group = hint.group;
+            changed = true;
+        }
         if (!existing.pageUrl && page && page.url)
         {
             existing.pageUrl = page.url;
@@ -213,6 +228,9 @@ function remember(url, mime, hint, page)
         title: (hint && hint.title) || '',
         label: (hint && hint.label) || '',
         videoKey: (hint && hint.videoKey) || '',
+        videoUrl: (hint && hint.videoUrl) || '',
+        audioUrl: (hint && hint.audioUrl) || '',
+        group: (hint && hint.group) || '',
         origin,
         pageUrl: (page && page.url) || '',
         pageTitle: (page && page.title) || '',
