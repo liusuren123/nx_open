@@ -386,7 +386,8 @@ bool PlaylistManager::clearEntries(const QString& id)
     return true;
 }
 
-int PlaylistManager::replaceStreamUrl(const QString& oldUrl, const QString& newUrl)
+int PlaylistManager::replaceStreamUrl(const QString& oldUrl, const QString& newUrl,
+    const QString& videoUrl, const QString& audioUrl, const QString& group)
 {
     if (oldUrl.isEmpty() || newUrl.isEmpty() || oldUrl == newUrl)
         return 0;
@@ -403,6 +404,16 @@ int PlaylistManager::replaceStreamUrl(const QString& oldUrl, const QString& newU
                 continue;
 
             entry.url = newUrl;
+
+            // The high quality tracks carry the same signature as the stream address, so a fresh
+            // address is useless without them: caching would download an expired pair.
+            if (!videoUrl.isEmpty())
+                entry.videoUrl = videoUrl;
+            if (!audioUrl.isEmpty())
+                entry.audioUrl = audioUrl;
+            if (!group.isEmpty())
+                entry.group = group;
+
             changed = true;
             ++updated;
         }

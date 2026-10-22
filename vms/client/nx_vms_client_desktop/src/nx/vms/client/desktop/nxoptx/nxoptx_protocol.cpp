@@ -99,6 +99,18 @@ QJsonObject failure(const QString& code)
     return {{kOk, false}, {kError, code}};
 }
 
+/**
+ * Decodes the payload the extension sends instead of a handful of long query parameters.
+ *
+ * A browser drops an external protocol address longer than about 2 KB, so the extension deflates
+ * the JSON and base64-encodes it. qUncompress() expects the uncompressed size as a big-endian
+ * 32-bit prefix, which is exactly what the extension prepends to the deflate stream.
+ */
+QByteArray uncompressPayload(const QString& packed)
+{
+    return qUncompress(QByteArray::fromBase64(packed.toLatin1(), QByteArray::Base64UrlEncoding));
+}
+
 QString stringValue(const QJsonObject& object, const QString& key)
 {
     const auto value = object.value(key);
@@ -333,10 +345,7 @@ QJsonObject addStreams(PlaylistManager* playlists, const QJsonObject& request)
     }
     else if (const QString packed = stringValue(request, kData); !packed.isEmpty())
     {
-        // qUncompress() expects the uncompressed size as a big-endian 32-bit prefix, which is
-        // exactly what the extension prepends to the deflate stream.
-        payload = qUncompress(QByteArray::fromBase64(packed.toLatin1(),
-            QByteArray::Base64UrlEncoding));
+        payload = uncompressPayload(packed);
     }
 
     if (payload.isEmpty())
@@ -427,15 +436,29 @@ QJsonObject removeEntry(PlaylistManager* playlists, const QJsonObject& request)
 /** Swaps an expired stream address for a fresh one in every playlist that holds it. */
 QJsonObject replaceStream(PlaylistManager* playlists, const QJsonObject& request)
 {
-    const QString url = stringValue(request, kUrl).trimmed();
+    // The replacement carries the high quality tracks too, and three addresses do not fit into a
+    // plain command, so the extension sends them compressed.
+    QJsonObject payload = request;
+    if (const QString packed = stringValue(request, kData); !packed.isEmpty())
+    {
+        const auto document = QJsonDocument::fromJson(uncompressPayload(packed));
+        if (document.isObject())
+            payload = document.object();
+    }
+
+    const QString url = stringValue(payload, kUrl).trimmed();
     if (url.isEmpty())
         return failure(QStringLiteral("noUrl"));
 
-    const QString newUrl = stringValue(request, kNewUrl).trimmed();
+    const QString newUrl = stringValue(payload, kNewUrl).trimmed();
     if (newUrl.isEmpty())
         return failure(QStringLiteral("noNewUrl"));
 
-    const int updated = playlists->replaceStreamUrl(url, newUrl);
+    const int updated = playlists->replaceStreamUrl(url, newUrl,
+        stringValue(payload, kVideoUrl).trimmed(),
+        stringValue(payload, kAudioUrl).trimmed(),
+        stringValue(payload, kGroup).trimmed());
+
     return {{kOk, true}, {QStringLiteral("updated"), updated}};
 }
 

@@ -410,19 +410,33 @@ function refreshClientLinks(tabId, replaced, fresh)
     for (const item of fresh)
     {
         if (item.videoKey)
-            freshByKey.set(item.videoKey, item.url);
+            freshByKey.set(item.videoKey, item);
     }
 
-    const encode = encodeURIComponent;
     for (const item of replaced)
     {
-        const url = item.videoKey ? freshByKey.get(item.videoKey) : undefined;
-        if (!url || url === item.url)
+        const current = item.videoKey ? freshByKey.get(item.videoKey) : undefined;
+        if (!current || !current.url || current.url === item.url)
             continue;
 
-        launchCommand(tabId,
-            `${SCHEME}://replaceStream?url=${encode(item.url)}&newUrl=${encode(url)}`);
+        // The high quality tracks are signed together with the stream address, so they expire with
+        // it: a replacement without them would leave the entry cacheable only as an expired pair.
+        // Three addresses do not fit into a plain command, hence the compressed form.
+        launchReplacement(tabId, {
+            url: item.url,
+            newUrl: current.url,
+            videoUrl: current.videoUrl || '',
+            audioUrl: current.audioUrl || '',
+            group: current.group || '',
+        });
     }
+}
+
+async function launchReplacement(tabId, replacement)
+{
+    const packed = await packPayload(JSON.stringify(replacement));
+    launchCommand(tabId,
+        `${SCHEME}://replaceStream?data=${encodeURIComponent(packed)}`);
 }
 
 function launchCommand(tabId, uri)
