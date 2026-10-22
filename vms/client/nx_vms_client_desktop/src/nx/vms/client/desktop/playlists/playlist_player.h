@@ -49,6 +49,12 @@ public:
      */
     QString lastError() const { return m_lastError; }
 
+    /**
+     * Shows the given message in the playlist for a moment. Also used for a cache that could not be
+     * started, so that the click is not silent.
+     */
+    Q_INVOKABLE void setLastError(const QString& text);
+
     static void registerQmlType();
 
 signals:
@@ -60,7 +66,6 @@ private:
     /** Appends the given playlist entry, expanding folders into their media files. */
     void appendExpanded(const PlaylistEntry& entry);
     void openCurrentEntry();
-    void setLastError(const QString& text);
 
     /**
      * Disables looping for the widget of the entry being played and makes it advance to the next

@@ -104,6 +104,13 @@ public:
     Q_INVOKABLE qreal cachingProgress(const QString& url);
 
     /**
+     * Why the last download of the resource failed, or an empty string. Shown in the playlist, so
+     * that clicking "Cache locally" on an entry with an expired link does not look like a click
+     * that does nothing.
+     */
+    Q_INVOKABLE QString cachingError(const QString& url) const;
+
+    /**
      * Downloads the whole resource into the cache in the background, unless it is there already, so
      * that the next playback does not need the network at all. Returns false when the resource
      * cannot be cached: a live stream has no end, and a full cache takes no more data.
@@ -140,6 +147,9 @@ private:
 
     /** Joins and forgets the downloads that have finished. */
     void reapFinishedCaching();
+
+    /** Records why a download failed; an empty message forgets the previous one. */
+    void setCachingError(const QString& url, const QString& message);
 };
 
 } // namespace nx::vms::client::desktop

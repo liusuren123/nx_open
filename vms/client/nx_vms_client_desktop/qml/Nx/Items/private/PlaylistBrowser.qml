@@ -50,6 +50,25 @@ Item
         onTriggered: value++
     }
 
+    // A download that fails (a signed link that has expired, for one) has to say so: the entry
+    // otherwise just stays as it is, as if the click had done nothing at all.
+    Connections
+    {
+        target: (typeof streamCache !== "undefined") ? streamCache : null
+
+        function onCachingChanged(url)
+        {
+            if (!target || !target.cachingError)
+                return
+
+            const error = target.cachingError(url)
+            if (!error || typeof playlistPlayer === "undefined" || !playlistPlayer)
+                return
+
+            playlistPlayer.setLastError(error)
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Playback
 

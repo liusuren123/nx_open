@@ -13,10 +13,12 @@
 #include <vector>
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QHash>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
 
 extern "C" {
@@ -70,6 +72,26 @@ QString defaultFolder()
         return {};
 
     return QDir(locations.first()).absoluteFilePath("stream_cache");
+}
+
+/**
+ * Message for a signed stream address whose time is up, empty for an address without an expiry
+ * or one that is still valid. Providers that sign their addresses (Bilibili, for one) put the
+ * moment they stop working into the `deadline` parameter, so an expired entry can be reported at
+ * once instead of failing silently in the background.
+ */
+QString expiredLinkMessage(const QString& url)
+{
+    static const QRegularExpression pattern(QStringLiteral("[?&]deadline=(\\d{1,12})"));
+    const auto match = pattern.match(url);
+    if (!match.hasMatch())
+        return {};
+
+    const qint64 deadline = match.captured(1).toLongLong();
+    if (deadline <= 0 || deadline * 1000 > QDateTime::currentMSecsSinceEpoch())
+        return {};
+
+    return StreamCache::tr("The link has expired. Scan the page in the browser again.");
 }
 
 qint64 folderSizeBytes(const QString& path)
@@ -951,6 +973,9 @@ struct StreamCache::Private
 
     /** Downloads in progress, one per resource. */
     QHash<QString, std::shared_ptr<CachingJob>> jobs;
+
+    /** Why the last download of a resource failed, one per resource address. */
+    QHash<QString, QString> errors;
 };
 
 std::shared_ptr<StreamCacheStorage> StreamCache::Private::storageFor(
@@ -1015,6 +1040,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
         {
             NX_WARNING(typeid(StreamCache), "Cannot cache '%1': it cannot be opened (%2).",
                 displayUrl, result);
+            cache->setCachingError(url, StreamCache::tr("The resource could not be opened."));
             job->failed = true;
             job->finished = true;
             emit cache->cachingChanged(url);
@@ -1030,6 +1056,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
         // A live stream, or a playlist whose media is fetched separately: there is nothing finite
         // to download once and keep.
         NX_WARNING(typeid(StreamCache), "Cannot cache '%1': its size is unknown.", displayUrl);
+        cache->setCachingError(url, StreamCache::tr("There is nothing to download: the stream has no end."));
         job->failed = true;
         job->finished = true;
         emit cache->cachingChanged(url);
@@ -1039,6 +1066,7 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
     std::shared_ptr<StreamCacheStorage> storage = storageFor(url, size);
     if (!storage)
     {
+        cache->setCachingError(url, StreamCache::tr("The cache folder is not usable."));
         job->failed = true;
         job->finished = true;
         emit cache->cachingChanged(url);
@@ -1141,6 +1169,12 @@ void StreamCache::Private::runCaching(const std::shared_ptr<CachingJob>& job)
     {
         NX_INFO(typeid(StreamCache), "Cached '%1' completely (%2 bytes).",
             displayUrl, size);
+        cache->setCachingError(url, QString());
+    }
+    else if (!job->stop)
+    {
+        cache->setCachingError(url,
+            StreamCache::tr("The download failed. The link may have expired."));
     }
 
     job->failed = failed;
@@ -1153,8 +1187,11 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
     StreamCache* const cache = job->cache;
     const QString displayUrl = localCameraSourceUrlForDisplay(job->url);
 
-    const auto finish = [&](bool ok)
+    const auto finish = [&](bool ok, const QString& error = QString())
     {
+        if (!ok)
+            cache->setCachingError(job->url, error);
+
         job->failed = !ok;
         job->finished = true;
         emit cache->cachingChanged(job->url);
@@ -1168,7 +1205,7 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
     {
         NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the cache folder is not usable.",
             displayUrl);
-        finish(false);
+        finish(false, StreamCache::tr("The cache folder is not usable."));
         return;
     }
 
@@ -1196,7 +1233,9 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
             NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the tracks were not downloaded.",
                 displayUrl);
         }
-        finish(false);
+        finish(false, job->stop
+            ? QString()
+            : StreamCache::tr("The tracks could not be downloaded. The link may have expired."));
         return;
     }
 
@@ -1210,7 +1249,7 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
         QFile::remove(outputPath);
         NX_WARNING(typeid(StreamCache), "Cannot cache '%1': the tracks could not be merged.",
             displayUrl);
-        finish(false);
+        finish(false, StreamCache::tr("The tracks could not be merged into one file."));
         return;
     }
 
@@ -1220,6 +1259,7 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
     job->done = job->total.load();
     job->failed = false;
     job->finished = true;
+    cache->setCachingError(job->url, QString());
     emit cache->cachingChanged(job->url);
     emit cache->mergedStreamReady(job->group, outputPath);
 }
@@ -1364,11 +1404,37 @@ qreal StreamCache::cachingProgress(const QString& url)
     return qMin(qreal(1), qreal(job->done.load()) / total);
 }
 
+QString StreamCache::cachingError(const QString& url) const
+{
+    const std::lock_guard<std::mutex> lock(d->mutex);
+    return d->errors.value(url);
+}
+
+void StreamCache::setCachingError(const QString& url, const QString& message)
+{
+    const std::lock_guard<std::mutex> lock(d->mutex);
+    if (message.isEmpty())
+        d->errors.remove(url);
+    else
+        d->errors.insert(url, message);
+}
+
 bool StreamCache::cacheStream(const QString& url)
 {
     if (url.isEmpty() || !writable())
         return false;
 
+    // A signed address carries the moment it stops working, so an expired one is reported right
+    // away instead of failing in the background a moment later.
+    const QString expired = expiredLinkMessage(url);
+    if (!expired.isEmpty())
+    {
+        setCachingError(url, expired);
+        emit cachingChanged(url);
+        return false;
+    }
+
+    setCachingError(url, QString());
     reapFinishedCaching();
 
     {
@@ -1396,6 +1462,15 @@ bool StreamCache::cacheMergedStream(const QString& url, const QString& videoUrl,
     if (!writable())
         return false;
 
+    const QString expired = expiredLinkMessage(videoUrl);
+    if (!expired.isEmpty())
+    {
+        setCachingError(url, expired);
+        emit cachingChanged(url);
+        return false;
+    }
+
+    setCachingError(url, QString());
     reapFinishedCaching();
 
     {
