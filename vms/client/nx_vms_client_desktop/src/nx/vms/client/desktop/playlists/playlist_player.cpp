@@ -193,6 +193,12 @@ void PlaylistPlayer::openCurrentEntry()
 
     m_currentResource = resources.first();
 
+    // A cached file is named after the identity of the media, which is a hash the user cannot
+    // place; the playlist entry knows what the file is, so that is the name the player shows.
+    const QString title = entry.title.trimmed();
+    if (!title.isEmpty() && m_currentResource->getName() != title)
+        m_currentResource->setName(title);
+
     // Playlist entries are added to the current layout, so that several of them can be watched at
     // the same time, exactly like resources opened from the resource tree.
     menu()->trigger(menu::DropResourcesAction, resources);
