@@ -511,6 +511,7 @@ QVariantMap PlaylistManager::entryStreamInfo(const QString& playlistId, int row)
         {QStringLiteral("videoUrl"), entry.videoUrl},
         {QStringLiteral("audioUrl"), entry.audioUrl},
         {QStringLiteral("group"), entry.group},
+        {QStringLiteral("title"), entry.title},
     };
 }
 

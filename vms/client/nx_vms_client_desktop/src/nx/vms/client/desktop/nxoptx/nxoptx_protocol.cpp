@@ -504,7 +504,11 @@ QJsonObject cacheMergedStream(StreamCache* cache, const QJsonObject& request)
     if (url.isEmpty() || videoUrl.isEmpty() || audioUrl.isEmpty() || group.isEmpty())
         return failure(QStringLiteral("noUrls"));
 
-    if (!cache->cacheMergedStream(url, videoUrl, audioUrl, group))
+    QString title = stringValue(request, kName).trimmed();
+    if (title.isEmpty())
+        title = stringValue(request, kTitle).trimmed();
+
+    if (!cache->cacheMergedStream(url, videoUrl, audioUrl, group, title))
         return failure(QStringLiteral("cannotCache"));
 
     return {{kOk, true}, {kUrl, url}, {kGroup, group}};

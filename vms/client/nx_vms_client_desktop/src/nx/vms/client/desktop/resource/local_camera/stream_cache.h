@@ -128,9 +128,11 @@ public:
      *
      * @param url Address of the stream whose progress the interface shows.
      * @param group Identity of the media; the merged file is remembered by it.
+     * @param title Name to give the merged file, so that the player, the resource tree and the
+     *     library all show a name the user recognises instead of the media identity hash.
      */
     Q_INVOKABLE bool cacheMergedStream(const QString& url, const QString& videoUrl,
-        const QString& audioUrl, const QString& group);
+        const QString& audioUrl, const QString& group, const QString& title = QString());
 
 signals:
     void changed();

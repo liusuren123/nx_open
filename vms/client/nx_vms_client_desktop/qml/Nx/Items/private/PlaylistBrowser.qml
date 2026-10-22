@@ -713,7 +713,8 @@ Item
                 if (progress >= 0)
                     streamCache.stopCaching(targetUrl)
                 else if (merged)
-                    streamCache.cacheMergedStream(targetUrl, highVideo, highAudio, group)
+                    streamCache.cacheMergedStream(targetUrl, highVideo, highAudio, group,
+                        info.title || "")
                 else
                     streamCache.cacheStream(targetUrl)
             }

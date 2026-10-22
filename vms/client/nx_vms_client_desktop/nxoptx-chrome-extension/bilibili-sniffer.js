@@ -70,10 +70,11 @@
         const fromUrl = String(location.pathname).match(/\/video\/(BV[0-9A-Za-z]+)/);
         const cid = data.cid || (data.pages && data.pages[0] ? data.pages[0].cid : 0);
 
-        // A multi-part video is named after the part that is playing.
+        // A multi-part video is named after the part that is playing. Plenty of videos have a part
+        // whose title repeats the video title, and that should not be duplicated in the name.
         const pages = data.pages || [];
         const page = pages.find((candidate) => candidate.cid === cid);
-        const title = (page && pages.length > 1 && page.part)
+        const title = (page && pages.length > 1 && page.part && page.part !== data.title)
             ? `${data.title} - ${page.part}`
             : (data.title || '');
 

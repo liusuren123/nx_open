@@ -94,6 +94,41 @@ QString expiredLinkMessage(const QString& url)
     return StreamCache::tr("The link has expired. Scan the page in the browser again.");
 }
 
+QString mergedFilePath(const QString& folder, const QString& title, const QString& identity)
+{
+    // The file is what the player, the resource tree and the library show, so it is named after the
+    // media rather than after its identity hash. Characters a file system rejects are replaced.
+    static const QRegularExpression forbidden(
+        QStringLiteral(R"([\\/:*?"<>|\x00-\x1f])"));
+
+    QString name = title;
+    name.remove(forbidden);
+    name = name.simplified();
+
+    // The cached file has both tracks, so the marker the sniffer adds to a video-only stream does
+    // not belong in its name.
+    static const QString kNoAudioMarker = QStringLiteral("（无音轨）");
+    if (name.endsWith(kNoAudioMarker))
+        name.chop(kNoAudioMarker.size());
+
+    name = name.trimmed();
+    if (name.size() > 80)
+        name.truncate(80);
+
+    if (name.isEmpty())
+        name = identity.left(12);
+
+    const QDir mergedFolder(folder);
+    QString path = mergedFolder.absoluteFilePath(name + QStringLiteral(".mp4"));
+    for (int i = 2; QFileInfo::exists(path); ++i)
+    {
+        path = mergedFolder.absoluteFilePath(
+            QStringLiteral("%1 (%2).mp4").arg(name).arg(i));
+    }
+
+    return path;
+}
+
 qint64 folderSizeBytes(const QString& path)
 {
     const QDir folder(path);
@@ -944,6 +979,9 @@ struct StreamCache::Private
         QString audioUrl;
         QString group;
 
+        /** Name of the merged file; empty falls back to the media identity. */
+        QString title;
+
         std::atomic<bool> stop{false};
         std::atomic<bool> finished{false};
         std::atomic<bool> failed{false};
@@ -1211,11 +1249,11 @@ void StreamCache::Private::runMerged(const std::shared_ptr<CachingJob>& job)
 
     // The merged file is remembered by the identity of the media, not by its address: the address is
     // refreshed every couple of hours, and the cached copy has to survive that.
-    const QString name = QString::fromLatin1(
+    const QString identity = QString::fromLatin1(
         QCryptographicHash::hash(job->group.toUtf8(), QCryptographicHash::Sha1).toHex());
-    const QString videoPath = QDir(temporaryFolder).absoluteFilePath(name + "-video.m4s");
-    const QString audioPath = QDir(temporaryFolder).absoluteFilePath(name + "-audio.m4s");
-    const QString outputPath = QDir(mergedFolder).absoluteFilePath(name + ".mp4");
+    const QString videoPath = QDir(temporaryFolder).absoluteFilePath(identity + "-video.m4s");
+    const QString audioPath = QDir(temporaryFolder).absoluteFilePath(identity + "-audio.m4s");
+    const QString outputPath = mergedFilePath(mergedFolder, job->title, identity);
 
     job->total = remoteSize(job->videoUrl, &job->stop)
         + remoteSize(job->audioUrl, &job->stop);
@@ -1454,7 +1492,7 @@ bool StreamCache::cacheStream(const QString& url)
 }
 
 bool StreamCache::cacheMergedStream(const QString& url, const QString& videoUrl,
-    const QString& audioUrl, const QString& group)
+    const QString& audioUrl, const QString& group, const QString& title)
 {
     if (url.isEmpty() || videoUrl.isEmpty() || audioUrl.isEmpty() || group.isEmpty())
         return false;
@@ -1484,6 +1522,7 @@ bool StreamCache::cacheMergedStream(const QString& url, const QString& videoUrl,
     job->videoUrl = videoUrl;
     job->audioUrl = audioUrl;
     job->group = group;
+    job->title = title;
     {
         const std::lock_guard<std::mutex> lock(d->mutex);
         d->jobs.insert(url, job);
