@@ -75,7 +75,10 @@ python package.py --out <输出路径>.zip
 所以按普通的「看请求 / 扫 DOM」思路一个可播地址都拿不到。扩展对它的处理是：
 
 1. 从页面状态里取当前视频的 `bvid` / `cid`（分 P 视频会自动带上分 P 标题）；
-2. 调两次同一个 `playurl` 接口（浏览器会带上账号 Cookie，所以画质就是账号的档位）：
+   * **番剧 / 电影**（`/bangumi/play/ss…`、`/bangumi/play/ep…`）不一样：数据在
+     `__INITIAL_STATE__.epInfo` / `epList` 里，接口也换成 `pgc/player/web/playurl`，用
+     `ep_id` + `cid` 查询；地址里的 `ep…` 优先于页面状态，切换集数不会拿错；
+2. 调两次 `playurl` 接口（浏览器会带上账号 Cookie，所以画质就是账号的档位）：
    * `fnval=16&platform=pc&fourk=1&qn=127`：DASH 的视频轨 / 音频轨，会员能拿到 1080P+ / 4K / HDR；
    * `fnval=1&platform=html5&high_quality=1&qn=80`：渐进式 MP4（画面声音一体，可直接播放），封顶 1080P；
 3. 渐进式地址作为条目本身：登录后是 1080P，未登录通常 720P；

@@ -86,6 +86,51 @@
     }
 
     /**
+     * The episode currently open on a bangumi page, or null for any other page.
+     *
+     * Bangumi pages keep their data in `epInfo` / `epList` rather than in `videoData`, and their
+     * player asks a different endpoint, which takes an episode id instead of a bvid.
+     */
+    function currentEpisode()
+    {
+        if (!String(location.pathname).startsWith('/bangumi/play/'))
+            return null;
+
+        const state = window.__INITIAL_STATE__ || {};
+        const episodes = state.epList || [];
+        const fromUrl = String(location.pathname).match(/\/bangumi\/play\/ep(\d+)/);
+
+        let info = state.epInfo || null;
+        if (fromUrl)
+        {
+            const playing = episodes.find((candidate) => String(candidate.id) === fromUrl[1]);
+            if (playing)
+                info = playing;
+        }
+
+        if (!info && episodes.length)
+            info = episodes[0];
+
+        if (!info || !info.id || !info.cid)
+            return null;
+
+        const media = state.mediaInfo || {};
+        const seasonTitle = media.title || (state.ssInfo && state.ssInfo.title) || '';
+        const episodeTitle = info.titleFormat || info.longTitle || info.title || '';
+        const title = seasonTitle && episodeTitle && episodeTitle !== seasonTitle
+            ? `${seasonTitle} ${episodeTitle}`
+            : (episodeTitle || seasonTitle);
+
+        return {
+            epId: String(info.id),
+            avid: info.aid || '',
+            bvid: info.bvid || '',
+            cid: info.cid,
+            title: String(title).replace(/\s+/g, ' ').trim(),
+        };
+    }
+
+    /**
      * Asks the playurl API for one form of the stream.
      *
      * `params.fnval` selects it: 16 is DASH, whose tracks carry 1080P+ / 4K / HDR / 8K, and 1 is a
@@ -93,11 +138,9 @@
      * than 1080P. `qn=127` asks for the highest quality; the API answers with what the account is
      * allowed to play. The account cookie is sent along, so a signed-in user gets their tier.
      */
-    async function requestPlayurl(video, params)
+    async function requestPlayurl(endpoint, params)
     {
         const query = new URLSearchParams({
-            bvid: video.bvid,
-            cid: String(video.cid),
             qn: '127',
             fnver: '0',
             fourk: '1',
@@ -106,13 +149,16 @@
 
         try
         {
-            const response = await fetch(`https://api.bilibili.com/x/player/playurl?${query}`,
-                {credentials: 'include'});
+            const response = await fetch(`${endpoint}?${query}`, {credentials: 'include'});
             if (!response.ok)
                 return null;
 
             const json = await response.json();
-            return json && json.code === 0 ? (json.data || null) : null;
+            if (!json || json.code !== 0)
+                return null;
+
+            // The bangumi endpoint answers with `result`, the regular one with `data`.
+            return json.data || json.result || null;
         }
         catch (error)
         {
@@ -137,11 +183,18 @@
      * progressive one, the highest DASH video track. The tracks themselves need their signatures,
      * so they are asked for separately: a single request stops at 1080P.
      */
-    async function collect(video)
+    async function collect(video, endpoint, identity)
     {
+        const common = {cid: String(video.cid)};
+        if (video.bvid)
+            common.bvid = video.bvid;
+        if (video.epId)
+            common.ep_id = video.epId;
+
         const [dashData, mp4Data] = await Promise.all([
-            requestPlayurl(video, {fnval: '16', qn: '127', platform: 'pc'}),
-            requestPlayurl(video, {fnval: '1', qn: '80', platform: 'html5', high_quality: '1'}),
+            requestPlayurl(endpoint, {...common, fnval: '16', qn: '127', platform: 'pc'}),
+            requestPlayurl(endpoint,
+                {...common, fnval: '1', qn: '80', platform: 'html5', high_quality: '1'}),
         ]);
 
         const dash = (dashData && dashData.dash) || {};
@@ -158,12 +211,12 @@
 
         for (const entry of durl)
         {
-            const item = add(`${video.bvid}|${video.cid}|progressive`,
+            const item = add(`${identity}|progressive`,
                 entry.url || entry.base_url, 'video', qualityLabel(progressiveQuality),
                 video.title);
             if (item)
             {
-                attachHighTracks(item, video, highVideo, highAudio);
+                attachHighTracks(item, identity, highVideo, highAudio);
                 found.push(item);
             }
         }
@@ -173,11 +226,11 @@
         const videoQuality = videoTrack ? Number(videoTrack.id) || 0 : 0;
         if (highVideo && videoQuality > progressiveQuality)
         {
-            const item = add(`${video.bvid}|${video.cid}|dash-video`, highVideo, 'video',
+            const item = add(`${identity}|dash-video`, highVideo, 'video',
                 `${qualityLabel(videoQuality)}（无音轨）`, video.title);
             if (item)
             {
-                attachHighTracks(item, video, highVideo, highAudio);
+                attachHighTracks(item, identity, highVideo, highAudio);
                 found.push(item);
             }
         }
@@ -186,14 +239,14 @@
     }
 
     /** Keeps the high quality tracks on the item; only the local cache uses them. */
-    function attachHighTracks(item, video, videoUrl, audioUrl)
+    function attachHighTracks(item, identity, videoUrl, audioUrl)
     {
         if (!videoUrl || !audioUrl)
             return;
 
         item.videoUrl = videoUrl;
         item.audioUrl = audioUrl;
-        item.group = `${video.bvid}|${video.cid}`;
+        item.group = identity;
     }
 
     /** Lexicographic comparison of two numeric key tuples. */
@@ -231,17 +284,17 @@
      * The page's own player result, used when the progressive request is refused. Its tracks are
      * separate, so the video has no sound; the labels say so.
      */
-    function fromPlayInfo(video)
+    function fromPlayInfo(video, identity)
     {
         const info = window.__playinfo__;
-        if (!info || !info.data)
+        const data = info && (info.data || info.result);
+        if (!data)
             return [];
 
-        const data = info.data;
         const found = [];
         for (const entry of data.durl || [])
         {
-            const item = add(`${video.bvid}|${video.cid}|progressive`,
+            const item = add(`${identity}|progressive`,
                 entry.url || entry.base_url, 'video', '', video.title);
             if (item)
                 found.push(item);
@@ -252,7 +305,7 @@
         if (videoTrack)
         {
             const label = videoTrack.height ? `${videoTrack.height}P（无音轨）` : '无音轨';
-            const item = add(`${video.bvid}|${video.cid}|dash-video`,
+            const item = add(`${identity}|dash-video`,
                 videoTrack.baseUrl || videoTrack.base_url, 'video', label, video.title);
             if (item)
                 found.push(item);
@@ -261,7 +314,7 @@
         const audioTrack = best(dash.audio, ['bandwidth']);
         if (audioTrack)
         {
-            const item = add(`${video.bvid}|${video.cid}|dash-audio`,
+            const item = add(`${identity}|dash-audio`,
                 audioTrack.baseUrl || audioTrack.base_url, 'audio', '音频', video.title);
             if (item)
                 found.push(item);
@@ -272,27 +325,38 @@
 
     async function scan()
     {
-        const video = currentVideo();
-        if (!video.bvid || !video.cid || querying)
+        if (querying)
             return;
 
-        const key = `${video.bvid}|${video.cid}`;
-        if (key === lastVideoKey)
+        const episode = currentEpisode();
+        const video = episode || currentVideo();
+
+        // A bangumi episode is identified by its episode id: it may have no bvid of its own, and
+        // the episode is what the player switches when another part is chosen.
+        const identity = episode ? `ep${episode.epId}|${episode.cid}` : `${video.bvid}|${video.cid}`;
+        const endpoint = episode
+            ? 'https://api.bilibili.com/pgc/player/web/playurl'
+            : 'https://api.bilibili.com/x/player/playurl';
+
+        if (!video.cid || !(episode || video.bvid))
             return;
 
-        lastVideoKey = key;
+        if (identity === lastVideoKey)
+            return;
+
+        lastVideoKey = identity;
         querying = true;
         try
         {
-            if (!(await collect(video)).length)
-                fromPlayInfo(video);
+            if (!(await collect(video, endpoint, identity)).length)
+                fromPlayInfo(video, identity);
             post();
         }
         catch (error)
         {
             // The API may be unreachable or the response may not be what we expect; the page's own
             // result, when there is one, is still worth reporting.
-            if (fromPlayInfo(video).length)
+            if (fromPlayInfo(video, identity).length)
                 post();
         }
         finally
