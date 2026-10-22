@@ -40,6 +40,39 @@ const dismissed = new Map();
 /** tabId -> {url, title} of the document that is currently loaded in the tab. */
 const tabPages = new Map();
 
+/**
+ * A Bilibili DASH track, for example
+ * `https://cdn.bilivideo.com/upgcxcode/04/82/1445918204/1445918204-1-100027.m4s?...`.
+ * The number before `-1-` is the media identity, the one after it is the quality id. The player
+ * asks for the video and the audio track separately, and some pages (bangumi among them) hand out
+ * no progressive address at all, so a pair of such requests is the only thing there is to offer.
+ */
+const BILIBILI_TRACK = /\/upgcxcode\/[^/]+\/[^/]+\/(\d+)\/\1-1-(\d+)\.m4s(?:[?#]|$)/i;
+
+/** Audio tracks of the same provider; every video quality id is outside this range. */
+const BILIBILI_AUDIO_QUALITY = /^30\d{3}$/;
+
+const BILIBILI_QUALITY_NAMES = {
+    6: '240P', 16: '360P', 32: '480P', 64: '720P', 74: '720P60', 80: '1080P',
+    112: '1080P+', 116: '1080P60', 120: '4K', 125: 'HDR', 126: '杜比视界', 127: '8K',
+    100026: '1080P', 100027: '1080P+', 100028: '4K',
+};
+
+/** Quality ids in ascending order; the ids themselves are not comparable across ranges. */
+const BILIBILI_QUALITY_ORDER = [6, 16, 32, 64, 74, 80, 100026, 112, 100027, 116, 120, 100028,
+    125, 126, 127];
+
+function bilibiliQualityRank(quality)
+{
+    return BILIBILI_QUALITY_ORDER.indexOf(Number(quality));
+}
+
+/** Everything the tracks of one media are needed for; keyed by the media identity. */
+const bilibiliTracks = new Map();
+
+/** Marks an item made from a pair of tracks, as opposed to one the page itself reported. */
+const BILIBILI_GROUP_PREFIX = 'bilidash|';
+
 let notifyTimer = 0;
 
 /** Network events that arrive before the stored list has been read back. */
@@ -390,8 +423,116 @@ function scheduleRefresh()
 
 function report(tabId, url, mime)
 {
+    const track = bilibiliTrack(url);
+    if (track)
+    {
+        if (rememberBilibiliTrack(tabId, track))
+            scheduleRefresh();
+        return;
+    }
+
     if (remember(url, mime, null, tabPages.get(tabId)))
         scheduleRefresh();
+}
+
+/** The media identity and quality of a Bilibili DASH track, or null for any other request. */
+function bilibiliTrack(url)
+{
+    const match = BILIBILI_TRACK.exec(String(url || ''));
+    if (!match)
+        return null;
+
+    return {
+        mediaId: match[1],
+        quality: match[2],
+        url,
+        audio: BILIBILI_AUDIO_QUALITY.test(match[2]),
+    };
+}
+
+/**
+ * Collects the two tracks of one media and offers them as a single item once both are known.
+ * Returns whether the list changed.
+ */
+function rememberBilibiliTrack(tabId, track)
+{
+    const page = tabPages.get(tabId) || {};
+    let entry = bilibiliTracks.get(track.mediaId);
+    if (!entry)
+    {
+        entry = {pageUrl: page.url || '', pageTitle: page.title || ''};
+        bilibiliTracks.set(track.mediaId, entry);
+    }
+
+    // The page may switch quality while playing; the best one seen is the one to offer.
+    if (track.audio)
+        entry.audio = track.url;
+    else if (!entry.video
+        || bilibiliQualityRank(track.quality) >= bilibiliQualityRank(entry.quality))
+    {
+        entry.video = track.url;
+        entry.quality = track.quality;
+    }
+
+    return addBilibiliItem(track.mediaId, entry);
+}
+
+/** Drops the items made from a pair of requests for the given document. */
+function dropBilibiliItems(pageUrl)
+{
+    let changed = false;
+    for (const [url, item] of [...media])
+    {
+        if (item.pageUrl === pageUrl && String(item.group || '').startsWith(BILIBILI_GROUP_PREFIX))
+        {
+            media.delete(url);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+function addBilibiliItem(mediaId, entry)
+{
+    if (!entry.video || !entry.audio)
+        return false;
+
+    // A page whose own sniffer works reports the same media, with better names and the highest
+    // quality the account allows; the items made from requests are only a fallback for the pages
+    // that hand out nothing else. Those items are recognised by their own group prefix.
+    const reportedByPage = [...media.values()].some(
+        (item) => item.pageUrl === entry.pageUrl && !!item.videoKey
+            && !item.videoKey.startsWith(BILIBILI_GROUP_PREFIX)
+            && item.videoKey.includes(mediaId));
+    if (reportedByPage)
+        return false;
+
+    const group = `${BILIBILI_GROUP_PREFIX}${mediaId}`;
+    const quality = BILIBILI_QUALITY_NAMES[entry.quality] || `qn${entry.quality}`;
+    const page = {url: entry.pageUrl, title: entry.pageTitle};
+
+    let changed = false;
+    for (const [url, item] of [...media])
+    {
+        if (item.group === group && url !== entry.video)
+        {
+            // The previous address, or a lower quality of the same media.
+            media.delete(url);
+            changed = true;
+        }
+    }
+
+    changed = remember(entry.video, 'video/mp4', {
+        kind: 'video',
+        label: `${quality}（无音轨）`,
+        title: '',
+        videoKey: group,
+        videoUrl: entry.video,
+        audioUrl: entry.audio,
+        group,
+    }, page) || changed;
+
+    return changed;
 }
 
 /**
@@ -568,6 +709,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
                 ? replaceSource(page.url, origin, new Set(list.map((item) => item.url)))
                 : [];
             let changed = replaced.length > 0;
+
+            // The page's own sniffer found this media, which it describes better than a pair of
+            // requests can; the items made from the requests are dropped.
+            if (origin !== 'net' && page.url && list.length)
+                changed = dropBilibiliItems(page.url) || changed;
 
             // A page-world sniffer names the video an address belongs to. The same video may be
             // reported with a fresh address from another page or another visit, and only the

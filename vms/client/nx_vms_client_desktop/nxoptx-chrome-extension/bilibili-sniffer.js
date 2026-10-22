@@ -39,6 +39,7 @@
     const reported = new Set();
     const items = [];
     let lastVideoKey = '';
+    let loggedKey = '';
     let querying = false;
 
     function post()
@@ -112,7 +113,10 @@
             info = episodes[0];
 
         if (!info || !info.id || !info.cid)
+        {
+            console.debug('[nxoptx] no episode in the page state', Object.keys(state), state.epInfo);
             return null;
+        }
 
         const media = state.mediaInfo || {};
         const seasonTitle = media.title || (state.ssInfo && state.ssInfo.title) || '';
@@ -155,7 +159,11 @@
 
             const json = await response.json();
             if (!json || json.code !== 0)
+            {
+                console.debug('[nxoptx] playurl refused', endpoint, json && json.code,
+                    json && json.message);
                 return null;
+            }
 
             // The bangumi endpoint answers with `result`, the regular one with `data`.
             return json.data || json.result || null;
@@ -339,7 +347,15 @@
             : 'https://api.bilibili.com/x/player/playurl';
 
         if (!video.cid || !(episode || video.bvid))
+        {
+            if (loggedKey !== location.pathname)
+            {
+                loggedKey = location.pathname;
+                console.debug('[nxoptx] nothing to look up on this page', location.pathname,
+                    Object.keys(window.__INITIAL_STATE__ || {}));
+            }
             return;
+        }
 
         if (identity === lastVideoKey)
             return;
