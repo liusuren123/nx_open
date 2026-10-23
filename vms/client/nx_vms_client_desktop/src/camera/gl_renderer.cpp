@@ -593,6 +593,18 @@ bool QnGLRenderer::drawVideoTextures(
                 std::unique_ptr<nx::media::VideoFrame> nonOwning(
                     nx::media::FfmpegVideoDecoder::fromAVFrame(decodedFrame.get()));
 
+                // A hardware decoded frame has no pixel format that can be converted into an image:
+                // its data lives in a GPU texture, which only the shader path below can draw. That
+                // path needs GL, so there is nothing to show here, but it must not take the client
+                // down with it.
+                if (!nonOwning)
+                {
+                    NX_WARNING(this, "Can't convert the decoded frame (format %1) into an image: "
+                        "software rendering can't display hardware decoded frames",
+                        decodedFrame->format);
+                    return false;
+                }
+
                 painter->drawImage(viewRect, nonOwning->toImage(), sourceRect);
             }
         }
