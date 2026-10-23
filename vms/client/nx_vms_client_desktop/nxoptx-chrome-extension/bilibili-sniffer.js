@@ -206,7 +206,7 @@
         ]);
 
         const dash = (dashData && dashData.dash) || {};
-        const videoTrack = best(dash.video, ['height', 'bandwidth']);
+        const videoTrack = chooseVideoTrack(dash.video);
         const audioTrack = best(dash.audio, ['bandwidth']);
         const highVideo = trackUrl(videoTrack);
         const highAudio = trackUrl(audioTrack);
@@ -289,6 +289,44 @@
     }
 
     /**
+     * Whether a DASH video track is in AV1, which the player is unable to decode.
+     *
+     * The player's bundled FFmpeg has no software AV1 decoder: the only one it ships is the
+     * hardware accelerated one, and that device is not set up by its decode path. Such a track is
+     * therefore silently dropped - the picture stays black and the timeline gets no thumbnails -
+     * while the same page served as AVC or HEVC plays normally.
+     */
+    function isAv1(track)
+    {
+        // 7 is AVC, 12 is HEVC, 13 is AV1.
+        const codecId = Number(track.codecid || track.codec_id || 0);
+        if (codecId)
+            return codecId === 13;
+
+        return /^av01/i.test(String(track.codecs || ''));
+    }
+
+    /**
+     * The largest video track the player can decode, or null when the page offers nothing but
+     * tracks it cannot decode. Such a track is not offered as an item: it would be cached in full
+     * and then play as a black picture, without timeline thumbnails.
+     */
+    function chooseVideoTrack(list)
+    {
+        const tracks = (list || []).filter(
+            (track) => track && (track.baseUrl || track.base_url));
+        const decodable = tracks.filter((track) => !isAv1(track));
+
+        if (decodable.length !== tracks.length)
+        {
+            console.debug(`[nxoptx] skipping ${tracks.length - decodable.length} AV1 track(s)`,
+                'the player cannot decode them');
+        }
+
+        return best(decodable, ['height', 'bandwidth']);
+    }
+
+    /**
      * The page's own player result, used when the progressive request is refused. Its tracks are
      * separate, so the video has no sound; the labels say so.
      */
@@ -309,7 +347,7 @@
         }
 
         const dash = data.dash || {};
-        const videoTrack = best(dash.video, ['height', 'bandwidth']);
+        const videoTrack = chooseVideoTrack(dash.video);
         if (videoTrack)
         {
             const label = videoTrack.height ? `${videoTrack.height}P（无音轨）` : '无音轨';
