@@ -92,19 +92,43 @@ QString LocalCameraSource::displayName() const
     return name.isEmpty() ? localCameraSourceUrlForDisplay(url) : name;
 }
 
+namespace {
+
+/** Whether the address is one Bilibili signed, no matter which host serves it. */
+bool isBilibiliSource(const QUrl& url)
+{
+    const QString host = url.host().toLower();
+    if (host == QLatin1String("bilivideo.com")
+        || host.endsWith(QLatin1String(".bilivideo.com"))
+        || host == QLatin1String("bilivideo.cn")
+        || host.endsWith(QLatin1String(".bilivideo.cn"))
+        || host == QLatin1String("bilibili.com")
+        || host.endsWith(QLatin1String(".bilibili.com")))
+    {
+        return true;
+    }
+
+    // Not every address handed out by the playurl API is served by Bilibili itself: some come from
+    // PCDN nodes on third-party domains (e.g. "mv0bs83m.edge.mountaintoys.cn"). Those nodes check
+    // the same headers the CDN does, so such an address is recognized by the signature parameters
+    // it carries rather than by its host.
+    const QUrlQuery query(url);
+    return query.hasQueryItem(QStringLiteral("upsig"))
+        && query.hasQueryItem(QStringLiteral("uparams"));
+}
+
+} // namespace
+
 HttpSourceHeaders httpSourceHeaders(const QString& url)
 {
     HttpSourceHeaders headers{QStringLiteral("NxMetaClient"), {}};
 
-    const QString host = QUrl(url).host().toLower();
-    const bool isBilibili = host == QLatin1String("bilivideo.com")
-        || host.endsWith(QLatin1String(".bilivideo.com"))
-        || host == QLatin1String("bilibili.com")
-        || host.endsWith(QLatin1String(".bilibili.com"));
-    if (!isBilibili)
+    if (!isBilibiliSource(QUrl(url)))
         return headers;
 
-    // A `platform=pc` address was signed for a browser, and the CDN checks the referer as well.
+    // A `platform=pc` address was signed for a browser, and the CDN checks the user agent and the
+    // referer as well: a request that looks like any other client is answered with 403 Forbidden
+    // even while the address itself is still within its validity period.
     headers.userAgent = QStringLiteral(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/140.0.0.0 Safari/537.36");
