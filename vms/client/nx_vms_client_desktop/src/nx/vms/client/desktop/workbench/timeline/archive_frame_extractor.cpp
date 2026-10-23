@@ -203,11 +203,17 @@ struct ArchiveFrameExtractor::Private
         if (seekIFrame)
         {
             streamWorker.lastSeekTime = request.timePoint;
-            streamWorker.archiveDelegate->seek(
+            const qint64 seekResult = streamWorker.archiveDelegate->seek(
                 duration_cast<microseconds>(request.timePoint).count(),
                 /*findIFrame*/ true);
 
             streamWorker.currentFrame = getNextVideoData();
+
+            NX_DEBUG(q, "Frame request at %1 ms: seek result %2, first frame at %3 ms",
+                request.timePoint.count(), seekResult,
+                streamWorker.currentFrame
+                    ? frameTimeMs(streamWorker.currentFrame).count()
+                    : -1);
             if (!streamWorker.currentFrame)
             {
                 returnResult(request, {}, ResultCode::endReached);
@@ -346,9 +352,15 @@ struct ArchiveFrameExtractor::Private
             if (decodedFrame && !decodeJob.scaleSize.isEmpty())
                 decodedFrame = decodedFrame->scaled(decodeJob.scaleSize);
 
-            returnResult(decodeJob.request, decodedFrame, decodedFrame.isNull()
+            const ResultCode resultCode = decodedFrame.isNull()
                 ? ResultCode::decodeFailed
-                : ResultCode::decoded);
+                : ResultCode::decoded;
+
+            NX_DEBUG(q, "Request at %1 ms: decoded %2 packet(s), result code %3",
+                decodeJob.request.timePoint.count(), decodeJob.frameSequence.size(),
+                static_cast<int>(resultCode));
+
+            returnResult(decodeJob.request, decodedFrame, resultCode);
         }
     };
 };

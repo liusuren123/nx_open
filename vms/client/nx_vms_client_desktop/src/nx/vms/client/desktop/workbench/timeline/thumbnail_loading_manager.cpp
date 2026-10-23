@@ -3,6 +3,7 @@
 #include "thumbnail_loading_manager.h"
 
 #include <nx/utils/log/assert.h>
+#include <nx/utils/log/log.h>
 #include <nx/utils/math/math.h>
 #include <recording/time_period_list.h>
 #include <ui/graphics/items/controls/time_slider.h>
@@ -108,6 +109,11 @@ void ThumbnailLoadingManager::refresh(
     m_panelBoundingHeight = boundingHeight;
     m_panelWindowPeriod = panelWindowPeriod;
     m_panelVisible = m_slider->isThumbnailsVisible();
+
+    NX_DEBUG(this, "Refresh: bounding height %1, time step %2 ms, window [%3, %4] ms, "
+        "thumbnails visible: %5",
+        boundingHeight, timeStep.count(), panelWindowPeriod.startTime().count(),
+        panelWindowPeriod.endTime().count(), m_panelVisible);
 
     ThumbnailLoader::TransformParams panelTransformParams;
     panelTransformParams.size = QnAspectRatio::isRotated90(rotation())

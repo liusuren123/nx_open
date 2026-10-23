@@ -3,6 +3,7 @@
 #include "thumbnail_loader.h"
 
 #include <core/resource/media_resource.h>
+#include <nx/utils/log/log.h>
 #include <nx/utils/math/math.h>
 #include <nx/utils/thread/long_runnable.h>
 #include <nx/vms/client/desktop/application_context.h>
@@ -191,10 +192,16 @@ void ThumbnailLoader::invalidateThumbnails()
 void ThumbnailLoader::process()
 {
     if (m_timeStep == 0ms || m_timeWindow.isNull())
+    {
+        NX_DEBUG(this, "Not requesting thumbnails: time step %1 ms, window [%2, %3] ms",
+            m_timeStep.count(), m_timeWindow.startTime().count(),
+            m_timeWindow.endTime().count());
         return;
+    }
 
     auto [startPeriodIndex, endPeriodIndex] = indexRange(m_timeWindow, m_timeStep);
 
+    int requested = 0;
     for (int64_t index = startPeriodIndex; index < endPeriodIndex; ++index)
     {
         if (!m_processedPeriodsIndexes.contains(index))
@@ -214,8 +221,17 @@ void ThumbnailLoader::process()
 
             m_processedPeriodsIndexes.insert(index);
             m_frameExtractor->requestFrame({time, tolerance, m_generation});
+            ++requested;
         }
     }
+
+    NX_DEBUG(this, "Requested %1 thumbnail(s) for window [%2, %3] ms, step %4 ms, "
+        "recorded periods: %5",
+        requested, m_timeWindow.startTime().count(), m_timeWindow.endTime().count(),
+        m_timeStep.count(),
+        m_recordedTimePeriods.has_value()
+            ? (m_recordedTimePeriods->empty() ? QStringLiteral("none") : QStringLiteral("present"))
+            : QStringLiteral("unrestricted"));
 }
 
 void ThumbnailLoader::addThumbnail(const ThumbnailPtr& thumbnail)
@@ -234,10 +250,18 @@ void ThumbnailLoader::addThumbnail(const ThumbnailPtr& thumbnail)
 void ThumbnailLoader::handleExtractedFrame(ArchiveFrameExtractor::Result reply)
 {
     if (reply.request.userData.toInt() != m_generation)
+    {
+        NX_DEBUG(this, "Dropping the frame for request %1 ms: request generation %2, current %3",
+            reply.request.timePoint.count(), reply.request.userData.toInt(), m_generation);
         return;
+    }
 
     if (!reply.decodedFrame)
+    {
+        NX_DEBUG(this, "No frame for request %1 ms, result code: %2",
+            reply.request.timePoint.count(), static_cast<int>(reply.resultCode));
         return;
+    }
 
     const auto actualTime = std::chrono::round<std::chrono::milliseconds>(
         std::chrono::microseconds(reply.decodedFrame->pkt_dts));

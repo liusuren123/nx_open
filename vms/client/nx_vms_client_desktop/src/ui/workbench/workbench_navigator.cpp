@@ -2473,6 +2473,10 @@ void QnWorkbenchNavigator::updateThumbnailsLoader()
 
     if (!canLoadThumbnailsForWidget(m_currentMediaWidget))
     {
+        NX_DEBUG(this, "Thumbnails are not available for the current widget: %1",
+            m_currentMediaWidget
+                ? m_currentMediaWidget->resource()->getName()
+                : QStringLiteral("<no widget>"));
         m_timeSlider->setThumbnailLoadingManager({});
     }
     else
@@ -2491,6 +2495,13 @@ void QnWorkbenchNavigator::updateThumbnailsLoader()
             m_timeSlider->thumbnailLoadingManager()->setRecordedTimePeriods(
                 cameraDataLoader->periods(Qn::RecordingContent));
         }
+
+        NX_DEBUG(this, "Thumbnails are available for the current widget: loader %1, "
+            "recorded periods: %2",
+            cameraDataLoader ? QStringLiteral("present") : QStringLiteral("absent"),
+            cameraDataLoader && !cameraDataLoader->periods(Qn::RecordingContent).empty()
+                ? QStringLiteral("present")
+                : QStringLiteral("none"));
     }
 }
 
